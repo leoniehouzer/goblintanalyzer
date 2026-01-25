@@ -307,6 +307,7 @@ module Oct (Carrier : Carrier) = struct
   let empty () = {unary = UnaryMap.empty; binary = BinaryMap.empty; infl = UnaryMap.empty}
   let is_empty o = true
 
+  
   (* Hilfsfunktionen für dim_add und dim_remove: *)
 
   (* TODO: Problem: old_index hat type Carrier.t muss aber int sein, und new_index hat type int aber muss Carrier.t sein *)
