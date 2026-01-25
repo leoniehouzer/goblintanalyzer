@@ -306,8 +306,108 @@ module Oct (Carrier : Carrier) = struct
     Hashtbl.hash (h1, h2) (* do we need to hash infl as well?*)
   let empty () = {unary = UnaryMap.empty; binary = BinaryMap.empty; infl = UnaryMap.empty}
   let is_empty o = true
-  let dim_add (ch: Apron.Dim.change) o = failwith  "SparseOctagonDomain.dim_add: not implemented"
-  let dim_remove (ch: Apron.Dim.change) o = failwith  "SparseOctagonDomain.dim_remove: not implemented"
+
+  (* Hilfsfunktionen für dim_add und dim_remove: *)
+
+  (* TODO: Problem: old_index hat type Carrier.t muss aber int sein, und new_index hat type int aber muss Carrier.t sein *)
+  let shift_index_add old_index occ_cols = 
+    (* finde in occ_cols alle eintäge kleiner gleich old_index und zähle sie (=k), dann new_index = old_index + k , return new_index *)
+    (* fold_left f startwert [x1; x2; ...; xn] bedeutet: f ( ... (f (f startwert x1) x2) ... ) xn *)
+    let k = List.fold_left (fun acc (index, count) -> if index <= old_index then acc + count else acc) 0 occ_cols
+    in let new_index = old_index + k 
+    in new_index
+
+  (*TODO: selbes Problem wie bei shift_index_add *)
+  let shift_index_remove old_index dim_list = 
+    let k = List.fold_left (fun acc index -> if index < old_index then acc + 1 else acc) 0 dim_list
+    in let new_index = old_index - k 
+    in new_index
+
+  let new_unary_add old_unary occ_cols = 
+    UnaryMap.fold (fun old_lit bound new_unary -> 
+        match old_lit with
+        | Pos old_index -> UnaryMap.add (Pos (shift_index_add old_index occ_cols)) bound new_unary
+        | Neg old_index -> UnaryMap.add (Neg (shift_index_add old_index occ_cols)) bound new_unary
+    ) UnaryMap.empty old_unary 
+
+  let new_unary_remove old_unary dim_list = 
+    UnaryMap.fold (fun old_lit bound new_unary -> 
+        match old_lit with
+        | Pos old_index -> 
+          if List.mem old_index dim_list then new_unary
+          else UnaryMap.add (Pos (shift_index_remove old_index dim_list)) bound new_unary
+        | Neg old_index -> 
+          if List.mem old_index dim_list then new_unary
+          else UnaryMap.add (Neg (shift_index_remove old_index dim_list)) bound new_unary
+    ) UnaryMap.empty old_unary 
+
+  let new_binary_add old_binary occ_cols = 
+    BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
+        let new_lit1 = match old_lit1 with
+          | Pos old_index1 -> Pos (shift_index_add old_index1 occ_cols)
+          | Neg old_index1 -> Neg (shift_index_add old_index1 occ_cols)
+        in
+        let new_lit2 = match old_lit2 with
+          | Pos old_index2 -> Pos (shift_index_add old_index2 occ_cols)
+          | Neg old_index2 -> Neg (shift_index_add old_index2 occ_cols)
+        in
+        BinaryMap.add (new_lit1, new_lit2) bound new_binary
+    ) BinaryMap.empty old_binary
+
+  (* TODO: anschauen was gelöscht werden muss!!!!*)
+  let new_binary_remove old_binary dim_list =
+    BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
+      match (old_lit1, old_lit2) with
+      | (Neg old_index1, Neg old_index2) -> 
+        if List.mem old_index1 dim_list || List.mem old_index2 dim_list then new_binary
+        else BinaryMap.add (Neg (shift_index_remove old_index1 dim_list), Neg (shift_index_remove old_index2 dim_list)) bound new_binary
+      | (Neg old_index1, Pos old_index2) ->
+        if List.mem old_index1 dim_list || List.mem old_index2 dim_list then new_binary
+        else BinaryMap.add (Neg (shift_index_remove old_index1 dim_list), Pos (shift_index_remove old_index2 dim_list)) bound new_binary
+      | (Pos old_index1, Neg old_index2) ->
+        if List.mem old_index1 dim_list || List.mem old_index2 dim_list then new_binary
+        else BinaryMap.add (Pos (shift_index_remove old_index1 dim_list), Neg (shift_index_remove old_index2 dim_list)) bound new_binary
+      | (Pos old_index1, Pos old_index2) ->
+        if List.mem old_index1 dim_list || List.mem old_index2 dim_list then new_binary
+        else BinaryMap.add (Pos (shift_index_remove old_index1 dim_list), Pos (shift_index_remove old_index2 dim_list)) bound new_binary
+    ) BinaryMap.empty old_binary
+
+
+  let infl_add lit1 lit2 infl = (* evtl nochmal anschauen *)
+    let infl_add_lit1 = 
+      match UnaryMap.find_opt lit1 infl with
+      | None -> UnaryMap.add lit1 (LitSet.singleton lit2) infl
+      | Some set -> UnaryMap.add lit1 (LitSet.add lit2 set) infl
+    in match UnaryMap.find_opt lit2 infl_add_lit1 with
+    | None -> UnaryMap.add lit2 (LitSet.singleton lit1) infl_add_lit1
+    | Some set -> UnaryMap.add lit2 (LitSet.add lit1 set) infl_add_lit1
+
+  (* kann ich dann glaub ich für dim_add und dim_remove verwenden*)
+  let rebuild_infl binary = 
+    (* über binary iterieren, und zu "leerer" infl hinzufügen *)
+    BinaryMap.fold (
+      fun (lit1, lit2) _ new_infl -> infl_add lit1 lit2 new_infl
+    ) binary UnaryMap.empty  
+
+  let dim_add (ch: Apron.Dim.change) o =
+    (* Ansatz aus listMatrix.ml, add_empty_columns *)
+    let cols_list = Array.to_list ch.dim in
+    let grouped_indices = List.group Int.compare cols_list in
+    let occ_cols = List.map (fun group -> ((List.hd group, List.length group))) grouped_indices in
+    (* Bsp.: cols_list = [1; 3; 3; 5] -> grouped_indices = [[1]; [3; 3]; [5]] -> occ_cols = [(1, 1); (3, 2); (5, 1)] *)
+    (* TODO: occ_cols verwenden um shift_index_add aufzurufen; neues octagon aufbauen (unary und binary), infl evtl. anhand von unary und binary erstellen anstatt umzuschreiben *)
+    let new_unary = new_unary_add o.unary occ_cols in
+    let new_binary = new_binary_add o.binary occ_cols in
+    let new_infl = rebuild_infl new_binary in
+    (* neues octaon zurückgeben *)
+    { unary = new_unary; binary = new_binary; infl = new_infl }
+
+  let dim_remove (ch: Apron.Dim.change) o = 
+    let dim_list = Array.to_list ch.dim in
+    let new_unary = new_unary_remove o.unary dim_list in
+    let new_binary = new_binary_remove o.binary dim_list in
+    let new_infl = rebuild_infl new_binary in
+    { unary = new_unary; binary = new_binary; infl = new_infl }
 
 end
 
