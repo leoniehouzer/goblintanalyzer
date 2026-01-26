@@ -396,30 +396,24 @@ module Oct (Carrier : Carrier) = struct
     ) binary UnaryMap.empty  
 
   let dim_add (ch: Apron.Dim.change) o =
-    match o with 
-    | None -> { unary = UnaryMap.empty; binary = BinaryMap.empty; infl = UnaryMap.empty } 
-    | Some o -> 
-      (* Ansatz aus listMatrix.ml, add_empty_columns *)
-      let cols_list = Array.to_list ch.dim in
-      let grouped_indices = List.group Int.compare cols_list in
-      let occ_cols = List.map (fun group -> ((List.hd group, List.length group))) grouped_indices in
-      (* Bsp.: cols_list = [1; 3; 3; 5] -> grouped_indices = [[1]; [3; 3]; [5]] -> occ_cols = [(1, 1); (3, 2); (5, 1)] *)
-      (* TODO: occ_cols verwenden um shift_index_add aufzurufen; neues octagon aufbauen (unary und binary), infl evtl. anhand von unary und binary erstellen anstatt umzuschreiben *)
-      let new_unary = new_unary_add o.unary occ_cols in
-      let new_binary = new_binary_add o.binary occ_cols in
-      let new_infl = rebuild_infl new_binary in
-      (* neues octaon zurückgeben *)
-      { unary = new_unary; binary = new_binary; infl = new_infl }
+    (* Ansatz aus listMatrix.ml, add_empty_columns *)
+    let cols_list = Array.to_list ch.dim in
+    let grouped_indices = List.group Int.compare cols_list in
+    let occ_cols = List.map (fun group -> ((List.hd group, List.length group))) grouped_indices in
+    (* Bsp.: cols_list = [1; 3; 3; 5] -> grouped_indices = [[1]; [3; 3]; [5]] -> occ_cols = [(1, 1); (3, 2); (5, 1)] *)
+    (* TODO: occ_cols verwenden um shift_index_add aufzurufen; neues octagon aufbauen (unary und binary), infl evtl. anhand von unary und binary erstellen anstatt umzuschreiben *)
+    let new_unary = new_unary_add o.unary occ_cols in
+    let new_binary = new_binary_add o.binary occ_cols in
+    let new_infl = rebuild_infl new_binary in
+    (* neues octaon zurückgeben *)
+    { unary = new_unary; binary = new_binary; infl = new_infl }
 
   let dim_remove (ch: Apron.Dim.change) o = 
-    match o with 
-    | None -> { unary = UnaryMap.empty; binary = BinaryMap.empty; infl = UnaryMap.empty } 
-    | Some o -> 
-      let dim_list = Array.to_list ch.dim in
-      let new_unary = new_unary_remove o.unary dim_list in
-      let new_binary = new_binary_remove o.binary dim_list in
-      let new_infl = rebuild_infl new_binary in
-      { unary = new_unary; binary = new_binary; infl = new_infl }
+    let dim_list = Array.to_list ch.dim in
+    let new_unary = new_unary_remove o.unary dim_list in
+    let new_binary = new_binary_remove o.binary dim_list in
+    let new_infl = rebuild_infl new_binary in
+    { unary = new_unary; binary = new_binary; infl = new_infl }
 
 end
 
@@ -590,7 +584,7 @@ struct
     in
     { d = oct; env = octb.env }
 
-    let leq a b =
+    (* let leq a b =
     let env_comp = Environment.cmp a.env b.env in
     if env_comp = -2 || env_comp > 0 then false else
     if is_bot_env a || is_top b then true else
@@ -600,9 +594,10 @@ struct
       (* TODO: can we assume, that all operations keep the octagons in normal form? Then we can do: *)
       (* check if ∀ (x ≤ c) ∈ a  ⇒ (x ≤ c) ∈ b *)
       (* check if ∀ (x ± y ≤ c) ∈ a  ⇒ (x ± y ≤ c) ∈ b *)
-      failwith "SparseOctagonDomain.leq: not implemented"
+      failwith "SparseOctagonDomain.leq: not implemented" *)
+    let leq a b = failwith "SparseOctagonDomain.leq: not implemented"
 
-  let join a b = 
+  (* let join a b = 
     match a.d,b.d with
     | None, _ -> b
     | _, None -> a
@@ -611,7 +606,8 @@ struct
       let mod_a = SparseOctagon.dim_add (Environment.dimchange a.env sup_env) (Some octa) in
       let mod_b = SparseOctagon.dim_add (Environment.dimchange b.env sup_env) (Some octb) in
       {d=cup mod_a mod_b; env = sup_env}
-    | Some octa, Some octb -> { d = cup a b; env = a.env} (* same environment, so we can just join the octagons *)
+    | Some octa, Some octb -> { d = cup a b; env = a.env} same environment, so we can just join the octagons *)
+  let join a b = failwith "SparseOctagonDomain.join: not implemented"
     
   let widen a b = failwith "SparseOctagonDomain.widen: not implemented"
   let narrow a b = failwith "SparseOctagonDomain.narrow: not implemented"
