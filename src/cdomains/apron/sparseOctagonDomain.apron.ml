@@ -29,15 +29,15 @@ module type Carrier = sig
   type t [@@deriving hash]
   val compare : t -> t -> int
   val string_of : t -> string
-  val carrier_to_int : t -> int
-  val int_to_carrier : int -> t
+  val carrier_to_int : t -> int (*neu*)
+  val int_to_carrier : int -> t (*neu*)
 end
 
 (** Literal, i.e. +var or -var
  *  ordered and printable
 *)
 module Lit (C : Carrier) = struct
-  type t = C.t lit (*[@@deriving hash]*)
+  type t = C.t lit (*[@@deriving hash]*) (* weis nicht, ob ich das weg amchen darf, aber sonst gehts nicht *)
   let compare a b = match a, b with
     | Pos x, Pos y
     | Neg x, Neg y -> C.compare x y
@@ -45,11 +45,11 @@ module Lit (C : Carrier) = struct
     | Neg x, Pos y -> -1
   let string_of lit = string_of_lit C.string_of lit
 
-  let carrier_to_int = function
+  let carrier_to_int = function (*neu*)
     | Pos v -> C.carrier_to_int v
     | Neg v -> C.carrier_to_int v 
   
-  let int_to_carrier i = 
+  let int_to_carrier i =  (*neu*)
     let c = C.int_to_carrier i in
     Pos c
 
