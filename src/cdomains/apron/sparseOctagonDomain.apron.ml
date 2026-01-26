@@ -29,19 +29,29 @@ module type Carrier = sig
   type t [@@deriving hash]
   val compare : t -> t -> int
   val string_of : t -> string
+  val carrier_to_int : t -> int
+  val int_to_carrier : int -> t
 end
 
 (** Literal, i.e. +var or -var
  *  ordered and printable
 *)
 module Lit (C : Carrier) = struct
-  type t = C.t lit 
+  type t = C.t lit (*[@@deriving hash]*)
   let compare a b = match a, b with
     | Pos x, Pos y
     | Neg x, Neg y -> C.compare x y
     | Pos x, Neg y -> 1
     | Neg x, Pos y -> -1
   let string_of lit = string_of_lit C.string_of lit
+
+  let carrier_to_int = function
+    | Pos v -> C.carrier_to_int v
+    | Neg v -> C.carrier_to_int v 
+  
+  let int_to_carrier i = 
+    let c = C.int_to_carrier i in
+    Pos c
 
   let hash = function
     | Pos v -> Hashtbl.hash (1, C.hash v)
@@ -52,12 +62,12 @@ end
  * Pair of literals, i.e. (+var, +var) or (+var, -var)
  * ordered and printable
 *)
-module Pair (C : Carrier) (C : Carrier) = struct
-  type t = C.t * C.t [@@deriving hash]
-  let compare (a1, a2) (b1, b2) = match compare a1 b1 with
-    | 0 -> compare a2 b2
+module Pair (C1 : Carrier) (C2 : Carrier) = struct
+  type t = C1.t * C2.t [@@deriving hash]
+  let compare (a1, a2) (b1, b2) = match C1.compare a1 b1 with
+    | 0 -> C2.compare a2 b2
     | x -> x
-  let string_of (v1,v2) = C.string_of v1 ^ C.string_of v2
+  let string_of (v1,v2) = C1.string_of v1 ^ C2.string_of v2
 end
 
 
@@ -311,23 +321,21 @@ module Oct (Carrier : Carrier) = struct
 
   (* Hilfsfunktionen für dim_add und dim_remove: *)
 
-  (* TODO: Problem: old_index hat type Carrier.t muss aber int sein, und new_index hat type int aber muss Carrier.t sein *)
   let shift_index_add (old_index : Carrier.t) (occ_cols : (int * int) list) : Carrier.t= 
     (* finde in occ_cols alle eintäge kleiner gleich old_index und zähle sie (=k), dann new_index = old_index + k , return new_index *)
     (* fold_left f startwert [x1; x2; ...; xn] bedeutet: f ( ... (f (f startwert x1) x2) ... ) xn *)
     let k = List.fold_left (
-      fun acc (index, count) -> if index <= old_index then acc + count else acc  (* TODO: old_index to int *)
+      fun acc (index, count) -> if index <= (Carrier.carrier_to_int old_index) then acc + count else acc 
       ) 0 occ_cols
-    in let new_index = old_index + k (* TODO: old_index to int *)
-    in new_index (* TODO: new_index to Carrier.t*)
+    in let new_index = (Carrier.carrier_to_int old_index) + k 
+    in Carrier.int_to_carrier new_index 
 
-  (*TODO: selbes Problem wie bei shift_index_add *)
   let shift_index_remove (old_index : Carrier.t) (dim_list : int list) : Carrier.t = 
     let k = List.fold_left (
-      fun acc index -> if index < old_index  then acc + 1 else acc (* TODO: old_index to int *)
+      fun acc index -> if index < (Carrier.carrier_to_int old_index) then acc + 1 else acc 
     ) 0 dim_list
-    in let new_index = old_index - k (* TODO: old_index to int *)
-    in new_index (* TODO: new_index to Carrier.t*)
+    in let new_index = (Carrier.carrier_to_int old_index) - k 
+    in Carrier.int_to_carrier new_index 
 
   let new_unary_add old_unary occ_cols = 
     UnaryMap.fold (fun old_lit bound new_unary -> 
@@ -340,10 +348,10 @@ module Oct (Carrier : Carrier) = struct
     UnaryMap.fold (fun old_lit bound new_unary -> 
         match old_lit with
         | Pos old_index -> 
-          if List.mem old_index dim_list then new_unary (* TODO: old_index to int *)
+          if List.mem (Carrier.carrier_to_int old_index) dim_list then new_unary 
           else UnaryMap.add (Pos (shift_index_remove old_index dim_list)) bound new_unary
         | Neg old_index -> 
-          if List.mem old_index dim_list then new_unary (* TODO: old_index to int *)
+          if List.mem (Carrier.carrier_to_int old_index) dim_list then new_unary 
           else UnaryMap.add (Neg (shift_index_remove old_index dim_list)) bound new_unary
     ) UnaryMap.empty old_unary 
 
@@ -365,16 +373,16 @@ module Oct (Carrier : Carrier) = struct
     BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
       match (old_lit1, old_lit2) with
       | (Neg old_index1, Neg old_index2) -> 
-        if List.mem old_index1 dim_list || List.mem old_index2 dim_list then new_binary (* TODO: old_index to int *)
+        if List.mem (Carrier.carrier_to_int old_index1) dim_list || List.mem (Carrier.carrier_to_int old_index2) dim_list then new_binary 
         else BinaryMap.add (Neg (shift_index_remove old_index1 dim_list), Neg (shift_index_remove old_index2 dim_list)) bound new_binary
       | (Neg old_index1, Pos old_index2) ->
-        if List.mem old_index1 dim_list || List.mem old_index2 dim_list then new_binary (* TODO: old_index to int *)
+        if List.mem (Carrier.carrier_to_int old_index1) dim_list || List.mem (Carrier.carrier_to_int old_index2) dim_list then new_binary 
         else BinaryMap.add (Neg (shift_index_remove old_index1 dim_list), Pos (shift_index_remove old_index2 dim_list)) bound new_binary
       | (Pos old_index1, Neg old_index2) ->
-        if List.mem old_index1 dim_list || List.mem old_index2 dim_list then new_binary (* TODO: old_index to int *)
+        if List.mem (Carrier.carrier_to_int old_index1) dim_list || List.mem (Carrier.carrier_to_int old_index2) dim_list then new_binary 
         else BinaryMap.add (Pos (shift_index_remove old_index1 dim_list), Neg (shift_index_remove old_index2 dim_list)) bound new_binary
       | (Pos old_index1, Pos old_index2) ->
-        if List.mem old_index1 dim_list || List.mem old_index2 dim_list then new_binary (* TODO: old_index to int *)
+        if List.mem (Carrier.carrier_to_int old_index1) dim_list || List.mem (Carrier.carrier_to_int old_index2) dim_list then new_binary 
         else BinaryMap.add (Pos (shift_index_remove old_index1 dim_list), Pos (shift_index_remove old_index2 dim_list)) bound new_binary
     ) BinaryMap.empty old_binary
 
@@ -433,6 +441,8 @@ struct
           else (subscr (i/10)) ^ transl.(i mod 10) in
         subscr i in
       "x"^to_subscript i
+    let carrier_to_int (c : t) : int = c
+    let int_to_carrier (i : int) : t = i
 
   end
   module SparseOctagon = Oct(IntBased)
