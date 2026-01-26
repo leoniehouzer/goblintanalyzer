@@ -386,7 +386,6 @@ module Oct (Carrier : Carrier) = struct
         else BinaryMap.add (Pos (shift_index_remove old_index1 dim_list), Pos (shift_index_remove old_index2 dim_list)) bound new_binary
     ) BinaryMap.empty old_binary
 
-
   let infl_add lit1 lit2 infl = (* evtl nochmal anschauen *)
     let infl_add_lit1 = 
       match UnaryMap.find_opt lit1 infl with
