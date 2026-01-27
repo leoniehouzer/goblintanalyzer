@@ -11,7 +11,7 @@ open GobApron
 module Mpqf = SharedFunctions.Mpqf
 
 exception Bot
-type 'v lit = Pos of 'v | Neg of 'v
+type 'v lit = Pos of 'v | Neg of 'v [@@deriving hash] (* [@@deriving hash] hinzugefügt *)
 let negate = function
   | Pos v -> Neg v
   | Neg v -> Pos v
@@ -25,49 +25,45 @@ let string_of_lit f = function
 (** Variable
  * type t, basically ordered and printable
 *)
-module type Carrier = sig
+module type Carrier = sig (* defines the module Carrier *)
   type t [@@deriving hash]
   val compare : t -> t -> int
   val string_of : t -> string
-  val carrier_to_int : t -> int (*neu*)
-  val int_to_carrier : int -> t (*neu*)
+  val to_int : t -> int (*neu*)
+  val to_t : int -> t (*neu*)
 end
 
 (** Literal, i.e. +var or -var
  *  ordered and printable
 *)
-module Lit (C : Carrier) = struct
-  type t = C.t lit (*[@@deriving hash]*) (* weis nicht, ob ich das weg amchen darf, aber sonst gehts nicht *)
+module Lit (C : Carrier) = struct (* implement the functor Lit *)
+  type t = C.t lit [@@deriving hash] 
   let compare a b = match a, b with
     | Pos x, Pos y
     | Neg x, Neg y -> C.compare x y
     | Pos x, Neg y -> 1
     | Neg x, Pos y -> -1
   let string_of lit = string_of_lit C.string_of lit
-
-  let carrier_to_int = function (*neu*)
-    | Pos v -> C.carrier_to_int v
-    | Neg v -> C.carrier_to_int v 
-  
-  let int_to_carrier i =  (*neu*)
-    let c = C.int_to_carrier i in
-    Pos c
-
   let hash = function
-    | Pos v -> Hashtbl.hash (1, C.hash v)
-    | Neg v -> Hashtbl.hash (0, C.hash v)
+  | Pos v -> Hashtbl.hash (1, C.hash v)
+  | Neg v -> Hashtbl.hash (0, C.hash v)
+
+  let to_int (i : t) : int = match i with
+    | Pos v -> C.to_int v
+    | Neg v -> C.to_int v
+  let to_t (i : int) = Pos (C.to_t i)
 end
 
 (**
  * Pair of literals, i.e. (+var, +var) or (+var, -var)
  * ordered and printable
 *)
-module Pair (C1 : Carrier) (C2 : Carrier) = struct
-  type t = C1.t * C2.t [@@deriving hash]
-  let compare (a1, a2) (b1, b2) = match C1.compare a1 b1 with
-    | 0 -> C2.compare a2 b2
+module Pair (C : Carrier) (C : Carrier) = struct
+  type t = C.t * C.t [@@deriving hash]
+  let compare (a1, a2) (b1, b2) = match C.compare a1 b1 with
+    | 0 -> C.compare a2 b2
     | x -> x
-  let string_of (v1,v2) = C1.string_of v1 ^ C2.string_of v2
+  let string_of (v1,v2) = C.string_of v1 ^ C.string_of v2
 end
 
 
@@ -76,9 +72,9 @@ end
  * - maps Literals and Pairs to their upper bounds wrt ≤
  * - internally maps Literals to their set of influencing Literals
 *)
-module Oct (Carrier : Carrier) = struct
+module Oct (Carrier : Carrier) = struct (* functor *)
 
-  module LitV = Lit (Carrier)
+  module LitV = Lit (Carrier) (* defines the module LitV by using the functor Lit *)
   module PairLV = Pair (LitV) (LitV)
   module UnaryMap = Map.Make(LitV)
   module BinaryMap = Map.Make(PairLV)
@@ -320,40 +316,42 @@ module Oct (Carrier : Carrier) = struct
 
 
   (* Hilfsfunktionen für dim_add und dim_remove: *)
-
+  (* Map: fold f m init computes (f kN dN ... (f k1 d1 init)...), where k1 ... kN are keys, and d1 ... dN are associated data *)
+  (* List: fold_left f startwert [x1; x2; ...; xn] bedeutet: f ( ... (f (f startwert x1) x2) ... ) xn *)
+  (* Achtung: bei Map zuerst map, dann startwert, bei list is es anders herum *)
+    
   let shift_index_add (old_index : Carrier.t) (occ_cols : (int * int) list) : Carrier.t= 
     (* finde in occ_cols alle eintäge kleiner gleich old_index und zähle sie (=k), dann new_index = old_index + k , return new_index *)
-    (* fold_left f startwert [x1; x2; ...; xn] bedeutet: f ( ... (f (f startwert x1) x2) ... ) xn *)
     let k = List.fold_left (
-      fun acc (index, count) -> if index <= (Carrier.carrier_to_int old_index) then acc + count else acc 
+      fun acc (index, count) -> if index <= (Carrier.to_int old_index) then acc + count else acc 
       ) 0 occ_cols
-    in let new_index = (Carrier.carrier_to_int old_index) + k 
-    in Carrier.int_to_carrier new_index 
+    in let new_index = (Carrier.to_int old_index) + k 
+    in Carrier.to_t new_index 
 
   let shift_index_remove (old_index : Carrier.t) (dim_list : int list) : Carrier.t = 
     let k = List.fold_left (
-      fun acc index -> if index < (Carrier.carrier_to_int old_index) then acc + 1 else acc 
+      fun acc index -> if index < (Carrier.to_int old_index) then acc + 1 else acc 
     ) 0 dim_list
-    in let new_index = (Carrier.carrier_to_int old_index) - k 
-    in Carrier.int_to_carrier new_index 
+    in let new_index = (Carrier.to_int old_index) - k 
+    in Carrier.to_t new_index 
 
   let new_unary_add old_unary occ_cols = 
     UnaryMap.fold (fun old_lit bound new_unary -> 
         match old_lit with
         | Pos old_index -> UnaryMap.add (Pos (shift_index_add old_index occ_cols)) bound new_unary
         | Neg old_index -> UnaryMap.add (Neg (shift_index_add old_index occ_cols)) bound new_unary
-    ) UnaryMap.empty old_unary 
+    ) old_unary UnaryMap.empty  
 
   let new_unary_remove old_unary (dim_list : int list) = 
     UnaryMap.fold (fun old_lit bound new_unary -> 
         match old_lit with
         | Pos old_index -> 
-          if List.mem (Carrier.carrier_to_int old_index) dim_list then new_unary 
+          if List.mem (Carrier.to_int old_index) dim_list then new_unary 
           else UnaryMap.add (Pos (shift_index_remove old_index dim_list)) bound new_unary
         | Neg old_index -> 
-          if List.mem (Carrier.carrier_to_int old_index) dim_list then new_unary 
+          if List.mem (Carrier.to_int old_index) dim_list then new_unary 
           else UnaryMap.add (Neg (shift_index_remove old_index dim_list)) bound new_unary
-    ) UnaryMap.empty old_unary 
+    ) old_unary UnaryMap.empty  
 
   let new_binary_add old_binary occ_cols = 
     BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
@@ -366,40 +364,29 @@ module Oct (Carrier : Carrier) = struct
           | Neg old_index2 -> Neg (shift_index_add old_index2 occ_cols)
         in
         BinaryMap.add (new_lit1, new_lit2) bound new_binary
-    ) BinaryMap.empty old_binary
+    ) old_binary BinaryMap.empty 
 
-  (* TODO: anschauen was gelöscht werden muss!!!!*)
+  (* TODO: anschauen was gelöscht werden muss!!!! aktuell: wenn x gelöscht werden soll, werden alle paare mit x gelöscht *)
   let new_binary_remove old_binary (dim_list : int list) =
     BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
       match (old_lit1, old_lit2) with
       | (Neg old_index1, Neg old_index2) -> 
-        if List.mem (Carrier.carrier_to_int old_index1) dim_list || List.mem (Carrier.carrier_to_int old_index2) dim_list then new_binary 
+        if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary 
         else BinaryMap.add (Neg (shift_index_remove old_index1 dim_list), Neg (shift_index_remove old_index2 dim_list)) bound new_binary
       | (Neg old_index1, Pos old_index2) ->
-        if List.mem (Carrier.carrier_to_int old_index1) dim_list || List.mem (Carrier.carrier_to_int old_index2) dim_list then new_binary 
+        if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary 
         else BinaryMap.add (Neg (shift_index_remove old_index1 dim_list), Pos (shift_index_remove old_index2 dim_list)) bound new_binary
       | (Pos old_index1, Neg old_index2) ->
-        if List.mem (Carrier.carrier_to_int old_index1) dim_list || List.mem (Carrier.carrier_to_int old_index2) dim_list then new_binary 
+        if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary 
         else BinaryMap.add (Pos (shift_index_remove old_index1 dim_list), Neg (shift_index_remove old_index2 dim_list)) bound new_binary
       | (Pos old_index1, Pos old_index2) ->
-        if List.mem (Carrier.carrier_to_int old_index1) dim_list || List.mem (Carrier.carrier_to_int old_index2) dim_list then new_binary 
+        if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary 
         else BinaryMap.add (Pos (shift_index_remove old_index1 dim_list), Pos (shift_index_remove old_index2 dim_list)) bound new_binary
-    ) BinaryMap.empty old_binary
+    ) old_binary BinaryMap.empty 
 
-  let infl_add lit1 lit2 infl = (* evtl nochmal anschauen *)
-    let infl_add_lit1 = 
-      match UnaryMap.find_opt lit1 infl with
-      | None -> UnaryMap.add lit1 (LitSet.singleton lit2) infl
-      | Some set -> UnaryMap.add lit1 (LitSet.add lit2 set) infl
-    in match UnaryMap.find_opt lit2 infl_add_lit1 with
-    | None -> UnaryMap.add lit2 (LitSet.singleton lit1) infl_add_lit1
-    | Some set -> UnaryMap.add lit2 (LitSet.add lit1 set) infl_add_lit1
-
-  (* kann ich dann glaub ich für dim_add und dim_remove verwenden*)
-  let rebuild_infl binary = 
-    (* über binary iterieren, und zu "leerer" infl hinzufügen *)
+  let rebuild_infl binary = (* über binary iterieren, und beide richtungen zu "leerer" infl hinzufügen *)
     BinaryMap.fold (
-      fun (lit1, lit2) _ new_infl -> infl_add lit1 lit2 new_infl
+      fun (lit1, lit2) _ new_infl -> add_elem lit2 lit1 (add_elem lit1 lit2 new_infl)
     ) binary UnaryMap.empty  
 
   let dim_add (ch: Apron.Dim.change) o =
@@ -430,7 +417,6 @@ end
 module VarManagement =
 struct
   module IntBased = struct
-
     type t = int [@@deriving eq, ord, hash]
     let string_of i = 
       let to_subscript i =
@@ -440,9 +426,8 @@ struct
           else (subscr (i/10)) ^ transl.(i mod 10) in
         subscr i in
       "x"^to_subscript i
-    let carrier_to_int (c : t) : int = c
-    let int_to_carrier (i : int) : t = i
-
+    let to_int (i : t) : int = i
+    let to_t (i : int) : t = i
   end
   module SparseOctagon = Oct(IntBased)
   include SharedFunctions.VarManagementOps (SparseOctagon)
