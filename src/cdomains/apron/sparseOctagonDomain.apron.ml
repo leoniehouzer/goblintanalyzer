@@ -387,7 +387,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
           else UnaryMap.add (Neg (shift_index_remove old_index dim_list)) bound new_unary
     ) old_unary UnaryMap.empty  
 
-  (* Berechnet von den zu löschenden Variablen, mit welchen anderen Variablen (die nicht gelöscht werden) sie verbunden sind *)
+  (* (* Berechnet von den zu löschenden Variablen, mit welchen anderen Variablen (die nicht gelöscht werden) sie verbunden sind *)
   let helper_infl infl dim_list = 
     UnaryMap.fold (fun lit set new_infl -> 
       match lit with 
@@ -411,8 +411,25 @@ module Oct (Carrier : Carrier) = struct (* functor *)
             ) set
             in UnaryMap.add (Neg x) new_set new_infl
         else new_infl (* die andern sind uns eh egal *)
-    ) infl UnaryMap.empty
-    
+    ) infl UnaryMap.empty *)
+
+  (* Remove binary constraints, where both variables are removed *)
+  let binary_remove1 old_binary (dim_list : int list) =
+    BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
+      match (old_lit1, old_lit2) with
+      | (Neg old_index1, Neg old_index2) -> 
+        if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
+        else BinaryMap.add (Neg old_index1, Neg old_index2) bound new_binary (* constraint behalten *)
+      | (Neg old_index1, Pos old_index2) ->
+        if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
+        else BinaryMap.add (Neg old_index1, Pos old_index2) bound new_binary (* constraint behalten *)
+      | (Pos old_index1, Neg old_index2) ->
+        if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
+        else BinaryMap.add (Pos old_index1, Neg old_index2) bound new_binary (* constraint behalten *)
+      | (Pos old_index1, Pos old_index2) ->
+        if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
+        else BinaryMap.add (Pos old_index1, Pos old_index2) bound new_binary (* constraint behalten *)
+    ) old_binary BinaryMap.empty 
 
   (* TODO: erstmal propagate2 verwenden aber evtl können wir das optimieren und hier manuell machen (später erst machen)*)
   let new_binary_remove old_binary (dim_list : int list) (infl : LitSet.t UnaryMap.t) =
@@ -703,6 +720,26 @@ struct
   (* ****************** *)
   (* transfer functions *)
   (* ****************** *)
+
+
+  let forget_var_new var oct =
+    let x = Environment.dim_of_var oct.env var in
+    match oct.d with
+    | None -> None
+    | Some {unary; binary; infl} -> (
+      let new_unary = SparseOctagon.UnaryMap.remove (Pos x) (SparseOctagon.UnaryMap.remove (Neg x) unary) 
+      in
+      let new_binary = 
+        if BinaryMap.find_opt (Pos x) infl = None || BinaryMap.find_opt (Neg x) infl = None 
+          then BinaryMap.fold (
+            fun (old_lit1, old_lit2) bound new_binary -> if (old_lit1 == (Pos x) || old_lit2 == (Pos x) || old_lit1 == (Neg x) || old_lit2 == (Neg x)) then new_binary (*"remove"*) else BinaryMap.add (old_lit1, old_lit2) bound new_binary
+            ) binary BinaryMap.empty
+            failwith "TODO: remove all binary constraints with with x"
+        else
+        failwith "TODO" 
+      in
+      let new_infl = rebuild_infl new_binary in
+      Some {unary=new_unary; binary=new_binary; infl=new_infl})
 
   (** Remove all bounds that relate to a particular literal, i.e. x or -x from oct *)
   (* ACHTUNG: entfernt einfach alles mit v, aber achtet nicht auf constraints die implizit gelten *)
