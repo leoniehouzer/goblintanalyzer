@@ -288,14 +288,9 @@ module Oct (Carrier : Carrier) = struct (* functor *)
       let infl,m2 = optimize m1 m2 infl in
       Some {unary = m1; binary = m2; infl}
     with Bot -> None
-  (*
-          Alternatively, store the show function 'v -> string inside the octagon and then use
-
-                  let comp v1 v2 = String.compare (show v1) (show v2)
-
-          Only disadvantage: this requires a lot of string manipulation ...
-  *)
-
+  (* Alternatively, store the show function 'v -> string inside the octagon and then use
+    let comp v1 v2 = String.compare (show v1) (show v2)
+    Only disadvantage: this requires a lot of string manipulation ... *)
 
   (** removes all constraints with +x or -x in binary, but adds the one that hold implicitly; returns the new unary and binary *)
     let forget_var_binary x unary binary infl = 
@@ -342,7 +337,6 @@ module Oct (Carrier : Carrier) = struct (* functor *)
       let (new_unary, new_binary, infl) = forget_var_binary x new_unary binary infl in
       Some {unary = new_unary ; binary = new_binary; infl = (rebuild_infl new_binary)}) (* TODO: muss evtl. subsumed aufgerufen werden?*)
 
-
   let list_of = function 
     | None -> None
     | Some {unary; binary; infl} -> Some (
@@ -357,7 +351,6 @@ module Oct (Carrier : Carrier) = struct (* functor *)
   let string_of_constraints f list = 
     String.concat "" (
       List.map (fun c -> "\t" ^ string_of_constr f c ^ "\n") list)
-
   let string_of oct = match list_of oct with
     | None -> "\t⊥\n"
     | Some  list -> string_of_constraints Carrier.string_of list
@@ -410,7 +403,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
           BinaryMap.add (new_lit1, new_lit2) bound new_binary
       ) o.binary BinaryMap.empty )
     in
-    { unary = new_unary; binary = new_binary; infl = (rebuild_infl new_binary) } (* neues octaon zurückgeben *)
+    { unary = new_unary; binary = new_binary; infl = (rebuild_infl new_binary) } 
 
 
   (* HELPER FUNCTIONS FOR DIM_REMOVE *)
@@ -703,21 +696,6 @@ struct
 
 
   (********************************************************************************)
-
-  (* brauch ich eig nicht mehr: *)
-  (** Remove all bounds that relate to a particular literal, i.e. x or -x from oct *) (* ACHTUNG: entfernt einfach alles mit v, aber achtet nicht auf constraints die implizit gelten *)
-  (* let remove_lit v (oct : SparseOctagon.t option) : SparseOctagon.t option= match oct with
-    | None -> None
-    | Some {unary; binary; infl} ->
-      let unary =  SparseOctagon.UnaryMap.remove v unary in (* Unary bound is easily removed *)
-      let infl, binary =  match SparseOctagon.UnaryMap.find_opt v infl with
-        | None -> infl, binary
-        | Some set -> let infl = SparseOctagon.UnaryMap.remove v infl in (* remove v influenced set *)
-          SparseOctagon.LitSet.fold (fun v' (infl,binary) ->  (* clean up infl sets from v , and remove pair constraints with v *)
-              let p = SparseOctagon.normal (v, v') in
-              SparseOctagon.rem_elem v' v infl,
-              SparseOctagon.BinaryMap.remove p binary) set (infl,binary) in
-      Some {unary; binary; infl} *)
 
   (** Remove all bounds that relate to a variable x from oct i.e. [[x := ?]] *)
   let forget_var var oct = let x = Environment.dim_of_var oct.env var in SparseOctagon.forget_var x oct.d
