@@ -98,6 +98,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
   let normal = function
     | (v1,v2) -> if LitV.compare v1 v2 <= 0 then (v1,v2)
       else (v2,v1)
+      
   (** implements map[v] ← (map[v] ⊔ b) and returns (status, map)
    *  status = None: new entry, Some false: no change, Some true: change 
   *)
@@ -130,13 +131,14 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     | None -> ()
     | Some b' -> if 0 > b+b' then raise Bot
 
+  (* FUNCTIONS FOR INFL: *)
+
   (** add a binary boundary motivated dependency to infl from v1 to v2, i.e. for infl[v1] ← infl[v1] ∪ v2 
    * precondition: v1 < v2  
   *)
   let add_elem v1 v2 infl = match UnaryMap.find_opt v1 infl with
     | None -> UnaryMap.add v1 (LitSet.singleton v2) infl
     | Some set -> UnaryMap.add v1 (LitSet.add v2 set) infl
-
 
   (** remove a binary boundary motivated dependency to infl from v1 to v2, i.e. infl[v1] ← infl[v1] ∖ v2 
    * precondition: v1 < v2  
@@ -146,6 +148,14 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     | Some set -> let set = LitSet.remove v2 set in
       if LitSet.is_empty set then UnaryMap.remove v1 infl
       else UnaryMap.add v1 set infl
+
+  (** rebuild the influence graph from the binary bounds map *)
+  let rebuild_infl binary = (* über binary iterieren, und beide richtungen zu "leerer" infl hinzufügen; TODO: was ist mit der precondition bei add_elem? *)
+    BinaryMap.fold (
+      fun (lit1, lit2) _ new_infl -> add_elem lit2 lit1 (add_elem lit1 lit2 new_infl)
+    ) binary UnaryMap.empty  
+
+
   let var_of_lit = function
     | Pos v | Neg v -> v
 
@@ -286,6 +296,48 @@ module Oct (Carrier : Carrier) = struct (* functor *)
           Only disadvantage: this requires a lot of string manipulation ...
   *)
 
+
+  (** removes all constraints with +x or -x in binary, but adds the one that hold implicitly; returns the new unary and binary *)
+    let forget_var_binary x unary binary infl = 
+      match UnaryMap.find_opt (Pos x) infl, UnaryMap.find_opt (Neg x) infl with
+      | None,_ | _,None -> (unary, BinaryMap.filter (fun (v1, v2) _ -> v1 <> Pos x && v1 <> Neg x && v2 <> Pos x && v2 <> Neg x) binary) (* remove all constraints with +x or -x*)
+      | Some pl, Some nl -> (* pl = set of literals, that are connected with Pos x, nl = for Neg x *)
+        let pl = LitSet.elements pl in (* convert sets of +x influenced Literals to lists *)
+        let nl = LitSet.elements nl in (* convert sets of -x influenced Literals to lists *)
+        iterate2 (fun (unary, binary) v1 v2 -> (* iterate on crossproduct of the influenced lists, v1 positive, v2 negative *)
+          let p1 = normal (Pos x, v1) in (* setup normalized pairs, connected via pos/neg x *)
+          let p2 = normal (Neg x, v2) in
+          (* Annahme: die Pairs sind immer in normalized order gespeichert *)
+          match BinaryMap.find_opt p1 binary, BinaryMap.find_opt p2 binary with (* lookup the bounds b1, b2 for these pairs *)
+          | None, _  | _, None -> failwith "cant happen, bc there should be a binary constraint, since it is in the influence graph"
+          | Some b1, Some b2 -> 
+            let binary = BinaryMap.remove p1 (BinaryMap.remove p2 binary) in (* remove the constraints with x and -x *)
+            let b = b1 + b2 in (* calculate the bound b for v1+v2 ≤ b*)
+            if v1 = negate v2 then (* Case: we connected +x-y ≤ b1 and -x+y ≤ b2 ⇒ -y+y ≤ b ⇒ 0 ≤ b ⇒ if b is negative then error, else do nothing *)
+              if b < 0 then raise Bot 
+              else (unary, binary)
+            else if v1 = v2 then   (* Case: we connected x+y ≤ b1 and -x+y ≤ b2 ⇒ y+y ≤ b ⇒ 2y ≤ b ⇒ y ≤ b/2 in unary speichern *)
+              let b = b/2 in
+              (match add_min unary v1 b with (* add y ≤ b/2 *) 
+                | Some false, unary -> (unary, binary) (* new entry *)
+                | None, unary (* entry present, but no change *) | Some true, unary (* entry changed *) -> check1 unary v1 b; (unary, binary))
+            else (* Case: we connected two different variables v1, v2 *) 
+              let p = normal (v1, v2) in
+              (match add2_min binary p b with (* add v1+v2 ≤ b *)
+                | Some false, binary -> (unary, binary) (* entry present, but no change *)
+                | Some true, binary (* entry changed *) | None, binary (* new entry *) -> check2 binary p b; (unary, binary))
+        ) (unary,binary) pl nl
+              
+  (** Remove all bounds that relate to a variable x from oct i.e. [[x := ?]] *)
+  let forget_var x oct =
+    match oct with
+    | None -> None
+    | Some {unary; binary; infl} -> (
+      let new_unary = (UnaryMap.remove (Pos x) (UnaryMap.remove (Neg x) unary)) in
+      let (new_unary, new_binary) = forget_var_binary x new_unary binary infl in
+      Some {unary = new_unary ; binary = new_binary; infl = (rebuild_infl new_binary)})
+
+
   let list_of = function 
     | None -> None
     | Some {unary; binary; infl} -> Some (
@@ -319,8 +371,8 @@ module Oct (Carrier : Carrier) = struct (* functor *)
   (* Map: fold f m init computes (f kN dN ... (f k1 d1 init)...), where k1 ... kN are keys, and d1 ... dN are associated data *)
   (* List: fold_left f startwert [x1; x2; ...; xn] bedeutet: f ( ... (f (f startwert x1) x2) ... ) xn *)
   (* Achtung: bei Map zuerst map, dann startwert, bei list is es anders herum *)
-    
-  let shift_index_add (old_index : Carrier.t) (occ_cols : (int * int) list) : Carrier.t= 
+  
+  let shift_index_add (old_index : Carrier.t) (occ_cols : (int * int) list) : Carrier.t = 
     (* finde in occ_cols alle eintäge kleiner gleich old_index und zähle sie (=k), dann new_index = old_index + k , return new_index *)
     let k = List.fold_left (
       fun acc (index, count) -> if index <= (Carrier.to_int old_index) then acc + count else acc 
@@ -328,43 +380,32 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     in let new_index = (Carrier.to_int old_index) + k 
     in Carrier.to_t new_index 
 
-  let new_unary_add old_unary occ_cols = 
-    UnaryMap.fold (fun old_lit bound new_unary -> 
-        match old_lit with
-        | Pos old_index -> UnaryMap.add (Pos (shift_index_add old_index occ_cols)) bound new_unary
-        | Neg old_index -> UnaryMap.add (Neg (shift_index_add old_index occ_cols)) bound new_unary
-    ) old_unary UnaryMap.empty  
-
-  let new_binary_add old_binary occ_cols = 
-    BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
-        let new_lit1 = match old_lit1 with
-          | Pos old_index1 -> Pos (shift_index_add old_index1 occ_cols)
-          | Neg old_index1 -> Neg (shift_index_add old_index1 occ_cols)
-        in
-        let new_lit2 = match old_lit2 with
-          | Pos old_index2 -> Pos (shift_index_add old_index2 occ_cols)
-          | Neg old_index2 -> Neg (shift_index_add old_index2 occ_cols)
-        in
-        BinaryMap.add (new_lit1, new_lit2) bound new_binary
-    ) old_binary BinaryMap.empty 
-
-  let rebuild_infl binary = (* über binary iterieren, und beide richtungen zu "leerer" infl hinzufügen *)
-    BinaryMap.fold (
-      fun (lit1, lit2) _ new_infl -> add_elem lit2 lit1 (add_elem lit1 lit2 new_infl)
-    ) binary UnaryMap.empty  
-
   let dim_add (ch: Apron.Dim.change) o =
-    (* Ansatz aus listMatrix.ml, add_empty_columns *)
     let cols_list = Array.to_list ch.dim in
     let grouped_indices = List.group Int.compare cols_list in
-    let occ_cols = List.map (fun group -> ((List.hd group, List.length group))) grouped_indices in
-    (* Bsp.: cols_list = [1; 3; 3; 5] -> grouped_indices = [[1]; [3; 3]; [5]] -> occ_cols = [(1, 1); (3, 2); (5, 1)] *)
-    (* TODO: occ_cols verwenden um shift_index_add aufzurufen; neues octagon aufbauen (unary und binary), infl evtl. anhand von unary und binary erstellen anstatt umzuschreiben *)
-    let new_unary = new_unary_add o.unary occ_cols in
-    let new_binary = new_binary_add o.binary occ_cols in
-    let new_infl = rebuild_infl new_binary in
-    (* neues octaon zurückgeben *)
-    { unary = new_unary; binary = new_binary; infl = new_infl }
+    let occ_cols = List.map (fun group -> ((List.hd group, List.length group))) grouped_indices in 
+    (* Ansatz aus listMatrix.ml, add_empty_columns; Bsp.: cols_list = [1; 3; 3; 5] -> grouped_indices = [[1]; [3; 3]; [5]] -> occ_cols = [(1, 1); (3, 2); (5, 1)] *)
+    let new_unary = (
+      UnaryMap.fold (fun old_lit bound new_unary -> 
+          match old_lit with
+          | Pos old_index -> UnaryMap.add (Pos (shift_index_add old_index occ_cols)) bound new_unary
+          | Neg old_index -> UnaryMap.add (Neg (shift_index_add old_index occ_cols)) bound new_unary
+      ) o.unary UnaryMap.empty ) 
+    in 
+    let new_binary = (
+      BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
+          let new_lit1 = match old_lit1 with
+            | Pos old_index1 -> Pos (shift_index_add old_index1 occ_cols)
+            | Neg old_index1 -> Neg (shift_index_add old_index1 occ_cols)
+          in
+          let new_lit2 = match old_lit2 with
+            | Pos old_index2 -> Pos (shift_index_add old_index2 occ_cols)
+            | Neg old_index2 -> Neg (shift_index_add old_index2 occ_cols)
+          in
+          BinaryMap.add (new_lit1, new_lit2) bound new_binary
+      ) o.binary BinaryMap.empty )
+    in
+    { unary = new_unary; binary = new_binary; infl = (rebuild_infl new_binary) } (* neues octaon zurückgeben *)
 
 
   (* HELPER FUNCTIONS FOR DIM_REMOVE *)
@@ -387,7 +428,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
           else UnaryMap.add (Neg (shift_index_remove old_index dim_list)) bound new_unary
     ) old_unary UnaryMap.empty  
 
-  (* (* Berechnet von den zu löschenden Variablen, mit welchen anderen Variablen (die nicht gelöscht werden) sie verbunden sind *)
+  (* Berechnet von den zu löschenden Variablen, mit welchen anderen Variablen (die nicht gelöscht werden) sie verbunden sind *)
   let helper_infl infl dim_list = 
     UnaryMap.fold (fun lit set new_infl -> 
       match lit with 
@@ -411,7 +452,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
             ) set
             in UnaryMap.add (Neg x) new_set new_infl
         else new_infl (* die andern sind uns eh egal *)
-    ) infl UnaryMap.empty *)
+    ) infl UnaryMap.empty
 
   (* Remove binary constraints, where both variables are removed *)
   let binary_remove1 old_binary (dim_list : int list) =
@@ -669,7 +710,7 @@ struct
     in
     { d = oct; env = octb.env }
 
-    let leq a b =
+    (* let leq a b =
     let env_comp = Environment.cmp a.env b.env in
     if env_comp = -2 || env_comp > 0 then false else
     if is_bot_env a || is_top b then true else
@@ -697,10 +738,10 @@ struct
       (* check if ∀ (x ± y ≤ c) ∈ a  ⇒ (x ± y ≤ c) ∈ b *)
       SparseOctagon.BinaryMap.for_all (
 
-      ) oct1'.binary
+      ) oct1'.binary *)
+  let leq a b = failwith "SparseOctagonDomain.leq: not implemented"
 
-
-  let join a b = 
+  (* let join a b = 
     match a.d,b.d with
     | None, _ -> b
     | _, None -> a
@@ -709,9 +750,10 @@ struct
       let mod_a = SparseOctagon.dim_add (Environment.dimchange a.env sup_env) octa in
       let mod_b = SparseOctagon.dim_add (Environment.dimchange b.env sup_env) octb in
       {d=cup mod_a mod_b; env = sup_env}
-    | Some octa, Some octb -> { d = cup a b; env = a.env} (* same environment, so we can just join the octagons*)
+    | Some octa, Some octb -> { d = cup a b; env = a.env} (* same environment, so we can just join the octagons*) 
+  *)
 
-  (* let join a b = failwith "SparseOctagonDomain.join: not implemented" *)
+  let join a b = failwith "SparseOctagonDomain.join: not implemented"
     
   let widen a b = failwith "SparseOctagonDomain.widen: not implemented"
   let narrow a b = failwith "SparseOctagonDomain.narrow: not implemented"
@@ -722,29 +764,11 @@ struct
   (* ****************** *)
 
 
-  let forget_var_new var oct =
-    let x = Environment.dim_of_var oct.env var in
-    match oct.d with
-    | None -> None
-    | Some {unary; binary; infl} -> (
-      let new_unary = SparseOctagon.UnaryMap.remove (Pos x) (SparseOctagon.UnaryMap.remove (Neg x) unary) 
-      in
-      let new_binary = 
-        if BinaryMap.find_opt (Pos x) infl = None || BinaryMap.find_opt (Neg x) infl = None 
-          then BinaryMap.fold (
-            fun (old_lit1, old_lit2) bound new_binary -> if (old_lit1 == (Pos x) || old_lit2 == (Pos x) || old_lit1 == (Neg x) || old_lit2 == (Neg x)) then new_binary (*"remove"*) else BinaryMap.add (old_lit1, old_lit2) bound new_binary
-            ) binary BinaryMap.empty
-            failwith "TODO: remove all binary constraints with with x"
-        else
-        failwith "TODO" 
-      in
-      let new_infl = rebuild_infl new_binary in
-      Some {unary=new_unary; binary=new_binary; infl=new_infl})
+  (********************************************************************************)
 
-  (** Remove all bounds that relate to a particular literal, i.e. x or -x from oct *)
-  (* ACHTUNG: entfernt einfach alles mit v, aber achtet nicht auf constraints die implizit gelten *)
-  (* evtl kann ich das ins SparseOctagon Modul verschieben *)
-  let remove_lit v (oct : SparseOctagon.t option) : SparseOctagon.t option= match oct with
+  (* brauch ich eig nicht mehr: *)
+  (** Remove all bounds that relate to a particular literal, i.e. x or -x from oct *) (* ACHTUNG: entfernt einfach alles mit v, aber achtet nicht auf constraints die implizit gelten *)
+  (* let remove_lit v (oct : SparseOctagon.t option) : SparseOctagon.t option= match oct with
     | None -> None
     | Some {unary; binary; infl} ->
       let unary =  SparseOctagon.UnaryMap.remove v unary in (* Unary bound is easily removed *)
@@ -755,18 +779,17 @@ struct
               let p = SparseOctagon.normal (v, v') in
               SparseOctagon.rem_elem v' v infl,
               SparseOctagon.BinaryMap.remove p binary) set (infl,binary) in
-      Some {unary; binary; infl}
+      Some {unary; binary; infl} *)
 
   (** Remove all bounds that relate to a variable x from oct i.e. [[x := ?]] *)
-  let forget_var oct x = 
-    let x = Environment.dim_of_var oct.env x in
-    remove_lit (Pos x) oct.d |> remove_lit (Neg x) (* |> ist pipe-symbol *)
-  (** Remove all bounds for variables x ∈ X, i.e. [[x := ?  | x ∈ X]]*)
-  let forget_vars t vars =
+  let forget_var var oct = let x = Environment.dim_of_var oct.env var in SparseOctagon.forget_var x oct.d
+
+  let forget_vars t vars = (* TODO: neu machen *)
     if is_bot_env t || is_top t then t
-    else let newoct = List.fold (fun oct i-> forget_var t i) (t.d) vars in
+    else let newoct = List.fold (fun oct i-> forget_var i t) (t.d) vars in
       { d = newoct; env = t.env }
 
+  (********************************************************************************)
   let assign_exp ask t var exp _ = failwith "SparseOctagonDomain.assign_exp: not implemented"
   let assign_var t v v' = failwith "SparseOctagonDomain.assign_var: not implemented"
   let assign_var_parallel t vvs = failwith "SparseOctagonDomain.assign_var_parallel: not implemented"
