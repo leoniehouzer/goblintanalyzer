@@ -306,7 +306,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
           match BinaryMap.find_opt p1 binary, BinaryMap.find_opt p2 binary with (* lookup the bounds b1, b2 for these pairs *)
           | None, _  | _, None -> failwith "cant happen, bc there should be a binary constraint, since it is in the influence graph"
           | Some b1, Some b2 -> 
-            let binary = BinaryMap.remove p1 (BinaryMap.remove p2 binary) in (* remove the constraints with x and -x *)
+            let binary = BinaryMap.remove p1 (BinaryMap.remove p2 binary) in (* remove the constraints with x and -x *) (* TODO: evtl. auch aus infl entfernen *)
             let b = b1 + b2 in (* calculate the bound b for v1+v2 ≤ b*)
             if v1 = negate v2 then (* Case: we connected +x-y ≤ b1 and -x+y ≤ b2 ⇒ -y+y ≤ b ⇒ 0 ≤ b ⇒ if b is negative then error, else do nothing *)
               if b < 0 then raise Bot 
@@ -464,7 +464,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     ) binary BinaryMap.empty)
 
   let dim_remove (ch: Apron.Dim.change) o = 
-    let dim_list = Array.to_list ch.dim in (* TODO: was ist wenn was 2x drin ist ? *)
+    let dim_list = Array.to_list ch.dim |> List.sort_uniq Int.compare in (* Duplikate entfernen *)
     let unary =  new_unary_remove2 o.unary dim_list in (* TODO: verison 1 oder 2 verwenden? *)
     let binary = binary_remove1 o.binary dim_list in
     let infl = rebuild_infl binary in
@@ -697,10 +697,11 @@ struct
 
   (********************************************************************************)
 
+
   (** Remove all bounds that relate to a variable x from oct i.e. [[x := ?]] *)
   let forget_var var oct = let x = Environment.dim_of_var oct.env var in SparseOctagon.forget_var x oct.d
 
-  let forget_vars t vars = (* TODO: neu machen *)
+  let forget_vars t vars =
     if is_bot_env t || is_top t then t
     else let newoct = List.fold (fun oct i-> forget_var i t) (t.d) vars in
       { d = newoct; env = t.env }
