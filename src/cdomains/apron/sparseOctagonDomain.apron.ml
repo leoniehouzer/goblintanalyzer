@@ -294,7 +294,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
         (binary, infl) l1 in
     {unary; binary; infl}
   
-  let strong_closure oct = 
+  let strong_closure oct = (* anschauen ob das so passt, evtl. neu machen *)
     let oct = complete oct in (* first enrich binary bounds by summing up unaries *)
     let (m1, m2, infl) = propagate2 (VarSet.of_list (List.map (fun (v, _) -> var_of_lit v) (UnaryMap.bindings oct.unary)), oct.unary, oct.binary, oct.infl) in (* then propagate binary bounds through the octagon *)
     let m1 = propagate1 (m1, m2, infl) in (* finally, propagate unary bounds through the octagon *)
@@ -640,8 +640,28 @@ struct
         (binary, infl) l1 in
     ({unary; binary; infl} : SparseOctagon.t) *)
   
+(** oct1 ⊔ oct2 as convex hull *)
+  let cup (o1: SparseOctagon.t) (o2: SparseOctagon.t) = 
+    let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
+    let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
+    let unary = SparseOctagon.UnaryMap.fold (fun v b1 acc -> let b2 = SparseOctagon.UnaryMap.find v acc in SparseOctagon.UnaryMap.add v (max b1 b2) acc) unary1 SparseOctagon.UnaryMap.empty in
+    let binary = SparseOctagon.BinaryMap.fold (fun v b1 acc -> let b2 = SparseOctagon.BinaryMap.find v acc in SparseOctagon.BinaryMap.add v (max b1 b2) acc) binary1 SparseOctagon.BinaryMap.empty in 
+    Some {SparseOctagon.unary=unary; binary=binary; infl = SparseOctagon.rebuild_infl binary}
 
-  (** oct1 ⊔ oct2 as convex hull *)
+(* let cup (o1: SparseOctagon.t) (o2: SparseOctagon.t) = (* verwendet cup_list und cup_list2*)
+    let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
+    let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
+    (* UnaryMap.bindings is a literal-ordered list *)
+    let l1 = SparseOctagon.UnaryMap.bindings unary1 in
+    let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
+    let unary = cup_list l1 l2 in             (*  unary1 ⊔ unary2  *)
+    (* BinaryMap.bindings is a pair-ordered list *)
+    let l1 = SparseOctagon.BinaryMap.bindings binary1 in
+    let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
+    let binary, infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
+    Some ({unary; binary; infl} : SparseOctagon.t) *)
+
+  (* (** oct1 ⊔ oct2 as convex hull *)
    let cup o1 o2  = (* TODO *)
       (* TODO: was ist mit dingen die implizit gelten? *)
       (* TODO: wozu brauchen wir complete? was ist mit dingen, die implizit gelten? *)
@@ -657,7 +677,7 @@ struct
       let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
       let unary = cup_list l1 l2 in             (*  unary1 ⊔ unary2  *)
       (* TODO: Do we need to think about calling optimize to get rid of redundant pair bounds?*)
-      Some ({unary; binary; infl} : SparseOctagon.t)
+      Some ({unary; binary; infl} : SparseOctagon.t) *)
 
   (* *************************** *)
   (* fixpoint iteration handling *)
@@ -683,7 +703,7 @@ struct
       {d=cup mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cup octa octb ; env = a.env} (* same environment, so we can just join the octagons*) 
  
-  let leq a b = (* TODO *)
+  let leq a b =
     let env_comp = Environment.cmp a.env b.env in
     if env_comp = -2 || env_comp > 0 then false else
     if is_bot_env a || is_top b then true else
@@ -691,10 +711,25 @@ struct
     (* bis hier: macht mann das immer so -> Rückgabewerte in AffineEq anschauen *)
     let oct1, oct2 = Option.get a.d, Option.get b.d in (* octagons rausholen *)
     let oct1'= if env_comp = 0 then oct1 else SparseOctagon.dim_add (Environment.dimchange a.env b.env) oct1 in
-    failwith "TODO: SparseOctagonDomain.leq: not implemented"
     (* jetzt haben beide octagons die selben variablennummern, also x hat in beiden z.B. die nummer 1 *)
-    (* neuer ansatz:  *)
-
+    let {SparseOctagon.unary=unary1; binary=binary1; _} = oct1' in
+    let {SparseOctagon.unary=unary2; binary=binary2; _} = oct2 in
+    (* TODO: schauen, ob die richtung stimmt!!! *)
+    if SparseOctagon.UnaryMap.cardinal unary1 > SparseOctagon.UnaryMap.cardinal unary2 || SparseOctagon.BinaryMap.cardinal binary1 > SparseOctagon.BinaryMap.cardinal binary2 then false (* oct 1/2 hat mehr elemente, also kanns gar nicht passen *) else
+    let unary_ok = SparseOctagon.UnaryMap.fold
+      (fun v b1 acc ->
+        if not acc then false
+        else let b2 = SparseOctagon.UnaryMap.find v unary2 in
+        (max b1 b2) = b2
+      ) unary1 true in
+    if not unary_ok then false
+    else SparseOctagon.BinaryMap.fold
+      (fun v b1 acc ->
+        if not acc then false
+        else let b2 = SparseOctagon.BinaryMap.find v binary2 in
+        (max b1 b2) = b2
+      ) binary1 true
+    
   let widen a b = failwith "SparseOctagonDomain.widen: not implemented"
   let narrow a b = failwith "SparseOctagonDomain.narrow: not implemented"
   let unify a b = failwith "SparseOctagonDomain.unify: not implemented"
