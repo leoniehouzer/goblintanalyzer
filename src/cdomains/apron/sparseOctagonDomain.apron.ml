@@ -714,21 +714,20 @@ struct
     (* jetzt haben beide octagons die selben variablennummern, also x hat in beiden z.B. die nummer 1 *)
     let {SparseOctagon.unary=unary1; binary=binary1; _} = oct1' in
     let {SparseOctagon.unary=unary2; binary=binary2; _} = oct2 in
-    (* TODO: schauen, ob die richtung stimmt!!! *)
-    if SparseOctagon.UnaryMap.cardinal unary1 > SparseOctagon.UnaryMap.cardinal unary2 || SparseOctagon.BinaryMap.cardinal binary1 > SparseOctagon.BinaryMap.cardinal binary2 then false (* oct 1/2 hat mehr elemente, also kanns gar nicht passen *) else
+    if SparseOctagon.UnaryMap.cardinal unary1 > SparseOctagon.UnaryMap.cardinal unary2 || SparseOctagon.BinaryMap.cardinal binary1 > SparseOctagon.BinaryMap.cardinal binary2 then false (* oct1 hat mehr elemente, also kanns gar nicht passen *) else
     let unary_ok = SparseOctagon.UnaryMap.fold
-      (fun v b1 acc ->
+      (fun v b2 acc ->
         if not acc then false
-        else let b2 = SparseOctagon.UnaryMap.find v unary2 in
-        (max b1 b2) = b2
-      ) unary1 true in
+        else let b1 = SparseOctagon.UnaryMap.find v unary1 in
+        (max b1 b2) = b1
+      ) unary2 true in
     if not unary_ok then false
     else SparseOctagon.BinaryMap.fold
-      (fun v b1 acc ->
+      (fun v b2 acc ->
         if not acc then false
-        else let b2 = SparseOctagon.BinaryMap.find v binary2 in
-        (max b1 b2) = b2
-      ) binary1 true
+        else let b1 = SparseOctagon.BinaryMap.find v binary1 in
+        (max b1 b2) = b1
+      ) binary2 true
     
   let widen a b = failwith "SparseOctagonDomain.widen: not implemented"
   let narrow a b = failwith "SparseOctagonDomain.narrow: not implemented"
