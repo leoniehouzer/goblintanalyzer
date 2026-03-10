@@ -745,7 +745,59 @@ struct
     else let newoct = List.fold (fun oct i-> forget_var i t) (t.d) vars in
       { d = newoct; env = t.env }
 
-  let assign_exp ask t var exp _ = failwith "SparseOctagonDomain.assign_exp: not implemented"
+
+  (* TODO: überarbeiten *)
+  let simplified_monomials_from_texp (t: t) texp =
+    let res = simplified_monomials_from_texp t texp in
+    if M.tracing then M.tracel "from_texp" "%s %a -> %s" (EConj.show @@ snd @@ BatOption.get t.d) Texpr1.Expr.pretty texp
+        (BatOption.map_default (fun (l,(o,d)) -> List.fold_right (fun (a,x,b) acc -> Printf.sprintf "%s*var_%d/%s + %s" (Z.to_string a) x (Z.to_string b) acc) l ((Z.to_string o)^"/"^(Z.to_string d))) "" res);
+    res
+
+  (* TODO: überarbeiten *)
+  let simplify_to_ref_and_offset (t: t) texp =
+    BatOption.bind (simplified_monomials_from_texp t texp )
+      (fun (sum_of_terms, (constant,divisor)) ->
+         (match sum_of_terms with
+          | [] -> Some (None, constant,divisor)
+          | [(coeff,var,divi)] -> Some (Rhs.canonicalize (Some (Z.mul divisor coeff,var), Z.mul constant divi,Z.mul divisor divi))
+          |_ -> None))
+
+  let assign_texpr t var texp : SparseOctagon.t option = failwith "TODO"
+
+  (** implemented as described on page 10 in the paper about Fast Interprocedural Linear Two-Variable Equalities in the Section "Abstract Effect of Statements"
+    This makes a copy of the data structure, it doesn't change it in-place. *)
+  (* übernommen aus linearTwoVarEqualityDomain *)
+  (* TODO: neu machen !!*)
+  let assign_texpr (t: VarManagement.t) var texp =
+    match t.d with
+    | Some d ->
+      let var_i = Environment.dim_of_var t.env var (* this is the variable we are assigning to *) in
+      begin match simplify_to_ref_and_offset t texp with
+        | None ->
+          (* Statement "assigned_var = ?" (non-linear assignment) *)
+          forget_var var tag
+        | Some (None, off, divi) ->
+          (* Statement "assigned_var = off" (constant assignment) *)
+          assign_const (forget_var t var) var_i off divi
+        | Some (Some (coeff_var,exp_var), off, divi) when var_i = exp_var ->
+          (* Statement "assigned_var = (coeff_var*assigned_var + off) / divi" *)
+          {d=Some (EConj.affine_transform d var_i (coeff_var, var_i, off, divi)); env=t.env }
+        | Some (Some monomial, off, divi) ->
+          (* Statement "assigned_var = (monomial) + off / divi" (assigned_var is not the same as exp_var) *)
+          meet_with_one_conj (forget_var t var) var_i (Some (monomial), off, divi)
+      end
+    | None -> bot_env
+
+  (* no_ov -> no overflow
+    if it's true then there is no overflow
+    -> Convert.texpr1_expr_of_cil_exp handles overflow *)
+  (* übernommen aus linearTwoVarEqualityDomain *)
+  let assign_exp ask (t: VarManagement.t) var exp (no_ov: bool Lazy.t) =
+    let t = if not @@ Environment.mem_var t.env var then add_vars t [var] else t in
+    match Convert.texpr1_expr_of_cil_exp ask t t.env exp no_ov with
+    | texp -> assign_texpr t var texp
+    | exception Convert.Unsupported_CilExp _ -> forget_var var t
+
   let assign_var t v v' = failwith "SparseOctagonDomain.assign_var: not implemented"
   let assign_var_parallel t vvs = failwith "SparseOctagonDomain.assign_var_parallel: not implemented"
   let assign_var_parallel_with t vvs = failwith "SparseOctagonDomain.assign_var_parallel_with: not implemented"
