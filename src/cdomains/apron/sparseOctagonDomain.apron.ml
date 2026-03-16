@@ -753,18 +753,18 @@ struct
     let exception NotLinearExpr in 
     let exception ScalarIsInfinity in 
     let negate coeff_var_list =
-      List.map (fun (monom, offs, divi) -> Z.(BatOption.map (fun (coeff,i) -> (neg coeff, i)) monom, neg offs, divi)) coeff_var_list
+      List.map (fun (monom, offs) -> Z.(BatOption.map (fun (coeff, i) -> (neg coeff, i)) monom, neg offs)) coeff_var_list
     in
     let rec convert_texpr texp =
       begin match texp with
         | Cst (Interval _) -> failwith "constant was an interval; this is not supported" (* TODO: aber hier ist interval doch supportet oder? *)
         | Cst (Scalar x) -> 
           begin match SharedFunctions.int_of_scalar ?round:None x with
-            | Some x -> [(None,x,Z.one)]
+            | Some x -> [(None, x)]
             | None -> raise ScalarIsInfinity end (* bedeutet, dass es keine exakte ganze zahl ist *)
         | Var x -> 
           let var_dim = Environment.dim_of_var t.env x in
-          [(Some (Z.one, var_dim), Z.zero, Z.one)] (* diesen fall habe ich vereinfacht *)
+          [(Some (Z.one, var_dim), Z.zero)] (* diesen fall habe ich vereinfacht *)
         | Unop  (Neg,  e, _, _) -> negate (convert_texpr e)
         | Unop  (Cast, e, _, _) -> convert_texpr e (* Ignore since casts in apron are used for floating point nums and rounding in contrast to CIL casts *)
         | Binop (Add, e1, e2, _, _) -> convert_texpr e1 @ convert_texpr e2
@@ -776,117 +776,120 @@ struct
     | x -> Some(x)
 
   (* aus LTVE, aber überarbeitet. *)
-  (** convert and simplify (wrt. reference variables) a texpr into a tuple of a list of monomials (coeff,varidx,divi) and a (constant/divi) *)
+  (** convert and simplify a texpr into a list of monomials (coeff,varidx) and a constant offset *)
   let simplified_monomials_from_texp (t: t) texp =
     BatOption.bind (monomials_from_texp t texp) (* wenn None, dann return None, sonst so weitermachen: *)
       (fun monomiallist ->
         let module IMap = Map.Make(Int) in
-        let accumulate_constants (exprcache, (aconst, adiv)) (v, offs, divi) = 
-           let gcdee = Z.gcd adiv divi in
-           let constant = (Z.(aconst * (divi / gcdee) + offs * (adiv / gcdee)), Z.lcm adiv divi) in
+        let accumulate_constants (exprcache, aconst) (v, offs) =
+           let constant = Z.add aconst offs in
            match v with
            | None -> (exprcache, constant)
-           | Some (coeff, idx) -> (* TODO: evtl diesen fall nochmal überprüfen *)
-             let old_coeff = BatOption.default Q.zero (IMap.find_opt idx exprcache) in
-             let new_coeff = Q.(old_coeff + make coeff divi) in
+           | Some (coeff, idx) ->
+             let old_coeff = BatOption.default Z.zero (IMap.find_opt idx exprcache) in
+             let new_coeff = Z.add old_coeff coeff in
              let newcache =
-               if Q.equal new_coeff Q.zero then IMap.remove idx exprcache
+               if Z.equal new_coeff Z.zero then IMap.remove idx exprcache
                else IMap.add idx new_coeff exprcache
              in (newcache, constant)
         in 
-        let (expr, constant) = List.fold_left accumulate_constants (IMap.empty, (Z.zero, Z.one)) monomiallist in (* abstract simplification of the guard wrt. reference variables *)
-        Some (IMap.fold (fun v c acc -> if Q.equal c Q.zero then acc else (Q.num c,v,Q.den c)::acc) expr [], constant))
+        let (expr, constant) = List.fold_left accumulate_constants (IMap.empty, Z.zero) monomiallist in
+        Some (IMap.fold (fun v c acc -> if Z.equal c Z.zero then acc else (c, v) :: acc) expr [], constant))
 
   let simplify_to_ref_and_offset (t: t) texp =
     BatOption.bind (simplified_monomials_from_texp t texp )
-      (fun (sum_of_terms, (constant,divisor)) ->
-         (match sum_of_terms with (* eig sollten divi und divisor immer 1 sein nach meiner vorherigen implementierung.*)
-          | [] when (divisor = Z.one) -> Some (None, constant, divisor) (* fall: ±c/1 *) 
-          | [(coeff,var,divi)] when (divi = Z.one && divisor = Z.one) && (Z.equal coeff Z.one || Z.equal coeff Z.minus_one) -> Some (Some (coeff, var), constant, Z.one)
+      (fun (sum_of_terms, constant) ->
+         (match sum_of_terms with
+          | [] -> Some (None, constant)
+          | [(coeff, var)] when Z.equal coeff Z.one || Z.equal coeff Z.minus_one -> Some (Some (coeff, var), constant)
           |_ -> None))
 
-  (** implemented as described on page 10 in the paper about Fast Interprocedural Linear Two-Variable Equalities in the Section "Abstract Effect of Statements"
-      This makes a copy of the data structure, it doesn't change it in-place. *)
+  (** assign case:  var := c   (c is a number, possibly negative)  *)
+  let assign_const var c (t : VarManagement.t) : VarManagement.t =
+    match t.d with
+    | None -> t
+    | Some oct ->
+      let x = Environment.dim_of_var t.env var in
+      let oct1 = SparseOctagon.forget_var x (Some oct) in
+      match oct1 with
+      | Some oct1 ->
+        let unary = SparseOctagon.UnaryMap.add (Pos x) c oct1.unary |> SparseOctagon.UnaryMap.add (Neg x) (-c) in 
+        let oct2 = { oct1 with SparseOctagon.unary = unary } in
+        {t with d = Some oct2}
+      | None -> t (* bot bleibt bot *)
+  
+  (** assign case:  var := +- var + c   (c is a number, possibly negative)
+      if minus is true, then var := -var + c, else var := +var + c 
+  *)
+  let substitute_exp (var : Var.t) minus c (t : VarManagement.t) : VarManagement.t = 
+    match t.d with
+    | None -> t
+    | Some oct ->
+      let var_i = Environment.dim_of_var t.env var in
+      if minus then
+        let unary = SparseOctagon.UnaryMap.fold (fun lit b new_unary -> match lit with
+            | Pos x when x = var_i -> SparseOctagon.UnaryMap.add (Neg x) (b - c) new_unary
+            | Neg x when x = var_i -> SparseOctagon.UnaryMap.add (Pos x) (b + c) new_unary
+            | _ -> SparseOctagon.UnaryMap.add lit b new_unary
+          ) oct.unary SparseOctagon.UnaryMap.empty
+        in
+        let binary = SparseOctagon.BinaryMap.fold (fun (lit1, lit2) b new_binary -> match lit1, lit2 with
+            | Pos x, _ when x = var_i -> SparseOctagon.BinaryMap.add (Neg x, lit2) (b - c) new_binary
+            | Neg x, _ when x = var_i -> SparseOctagon.BinaryMap.add (Pos x, lit2) (b + c) new_binary
+            | _, Pos x when x = var_i -> SparseOctagon.BinaryMap.add (lit1, Neg x) (b - c) new_binary
+            | _, Neg x when x = var_i -> SparseOctagon.BinaryMap.add (lit1, Pos x) (b + c) new_binary
+            | _ -> SparseOctagon.BinaryMap.add (lit1, lit2) b new_binary
+          ) oct.binary SparseOctagon.BinaryMap.empty
+        in
+        {t with d = Some {unary; binary; infl = SparseOctagon.rebuild_infl binary}}
+      else
+        let unary = SparseOctagon.UnaryMap.fold (fun lit b new_unary -> match lit with
+            | Pos x when x = var_i -> SparseOctagon.UnaryMap.add (Pos x) (b + c) new_unary
+            | Neg x when x = var_i -> SparseOctagon.UnaryMap.add (Neg x) (b - c) new_unary
+            | _ -> SparseOctagon.UnaryMap.add lit b new_unary
+          ) oct.unary SparseOctagon.UnaryMap.empty
+        in
+        let binary = SparseOctagon.BinaryMap.fold (fun (lit1, lit2) b new_binary -> match lit1, lit2 with
+            | Pos x, _ when x = var_i -> SparseOctagon.BinaryMap.add (Pos x, lit2) (b + c) new_binary
+            | Neg x, _ when x = var_i -> SparseOctagon.BinaryMap.add (Neg x, lit2) (b - c) new_binary
+            | _, Pos x when x = var_i -> SparseOctagon.BinaryMap.add (lit1, Pos x) (b + c) new_binary
+            | _, Neg x when x = var_i -> SparseOctagon.BinaryMap.add (lit1, Neg x) (b - c) new_binary
+            | _ -> SparseOctagon.BinaryMap.add (lit1, lit2) b new_binary
+          ) oct.binary SparseOctagon.BinaryMap.empty
+        in
+        {t with d = Some {unary; binary; infl = SparseOctagon.rebuild_infl binary}} (* kein subsumed nötig, da wir das octagon komplett in "x-Richtung" verschieben *)
+
+  (* aus LTVE, aber überarbeitet. *)
+  (** Assign texpr to var in the octagon domain, for the cases ±x + c  or  c. All other cases lead to forget_var *)
   let assign_texpr (t: VarManagement.t) var texp =
     match t.d with
+    | None -> t
     | Some d ->
       let var_i = Environment.dim_of_var t.env var (* this is the variable we are assigning to *) in
       begin match simplify_to_ref_and_offset t texp with
-        | None ->
-          (* Statement "assigned_var = ?" (non-linear assignment) *)
-          forget_var t var
-        | Some (None, off, divi) ->
-          (* Statement "assigned_var = off" (constant assignment) *)
-          assign_const (forget_var t var) var_i off divi
-        | Some (Some (coeff_var,exp_var), off, divi) when var_i = exp_var ->
-          (* Statement "assigned_var = (coeff_var*assigned_var + off) / divi" *)
-          {d=Some (EConj.affine_transform d var_i (coeff_var, var_i, off, divi)); env=t.env }
-        | Some (Some monomial, off, divi) ->
-          (* Statement "assigned_var = (monomial) + off / divi" (assigned_var is not the same as exp_var) *)
-          meet_with_one_conj (forget_var t var) var_i (Some (monomial), off, divi)
+        | Some (None, c) -> assign_const var (Z.to_int c) t (* case: var := c*) 
+        | Some (Some (coeff_var,exp_var), off) when var_i = exp_var -> substitute_exp var (Z.equal coeff_var Z.minus_one) (Z.to_int off) t (* case: var := ±var + c *) 
+        | Some (Some (coeff_var,exp_var), off) -> (* case: var := ±var' + c *) 
+            failwith "TODO: funktion erstellen und hier einbinden"
+        | _ -> failwith "TODO: forget_var machen"
       end
-    | None -> bot_env
 
   (* no_ov -> no overflow
     if it's true then there is no overflow
     -> Convert.texpr1_expr_of_cil_exp handles overflow *)
   (* übernommen aus linearTwoVarEqualityDomain.apron.ml *)
-  (* TODO: welchen type gibt assign_exp zurück?*)
-  let assign_exp ask (oct: VarManagement.t) var exp (no_ov: bool Lazy.t) =
+  let assign_exp ask (oct: VarManagement.t) var exp (no_ov: bool Lazy.t) : VarManagement.t =
     let t = if not @@ Environment.mem_var oct.env var then add_vars oct [var] else oct in
     match Convert.texpr1_expr_of_cil_exp ask t t.env exp no_ov with
     | texp -> assign_texpr t var texp
-    | exception Convert.Unsupported_CilExp _ -> forget_var var oct 
-
-  (** assign case:  var := c   (c is a number, possibly negative)  *)
-  let assign_const var c (oct : SparseOctagon.t) =
-    let oct1 = SparseOctagon.forget_var var (Some oct) in
-    match oct1 with
-    | Some oct1 -> let unary = SparseOctagon.UnaryMap.add (Pos var) c oct1.unary |> SparseOctagon.UnaryMap.add (Neg var) (-c) in
-      { oct1 with SparseOctagon.unary = unary }
-    | None -> oct (* bot bleibt bot *)
-  
-  (** assign case:  var := +- var + c   (c is a number, possibly negative)
-      if minus is true, then var := -var + c, else var := +var + c 
-  *)
-  let substitute_exp var minus c (oct : SparseOctagon.t) = 
-    if minus then 
-      (let unary = SparseOctagon.UnaryMap.fold (fun lit b new_unary -> match lit with 
-        | Pos x when x = var -> SparseOctagon.UnaryMap.add (Neg x) (b - c) new_unary
-        | Neg x when x = var -> SparseOctagon.UnaryMap.add (Pos x) (b + c) new_unary
-        | _ -> SparseOctagon.UnaryMap.add lit b new_unary
-      ) oct.unary SparseOctagon.UnaryMap.empty
-      in 
-      let binary = SparseOctagon.BinaryMap.fold (fun (lit1, lit2) b new_binary -> match lit1, lit2 with
-          | Pos x, _ when x = var -> SparseOctagon.BinaryMap.add (Neg x, lit2) (b - c) new_binary
-          | Neg x, _ when x = var -> SparseOctagon.BinaryMap.add (Pos x, lit2) (b + c) new_binary
-          | _, Pos x when x = var -> SparseOctagon.BinaryMap.add (lit1, Neg x) (b - c) new_binary
-          | _, Neg x when x = var -> SparseOctagon.BinaryMap.add (lit1, Pos x) (b + c) new_binary
-          | _ -> SparseOctagon.BinaryMap.add (lit1, lit2) b new_binary
-        ) oct.binary SparseOctagon.BinaryMap.empty 
-      in {SparseOctagon.unary;binary;infl = SparseOctagon.rebuild_infl binary})
-    else 
-      let unary = SparseOctagon.UnaryMap.fold (fun lit b new_unary -> match lit with 
-          | Pos x when x = var -> SparseOctagon.UnaryMap.add (Pos x) (b + c) new_unary
-          | Neg x when x = var -> SparseOctagon.UnaryMap.add (Neg x) (b - c) new_unary
-          |_ -> SparseOctagon.UnaryMap.add lit b new_unary
-        ) oct.unary SparseOctagon.UnaryMap.empty
-      in 
-      let binary = SparseOctagon.BinaryMap.fold (fun (lit1, lit2) b new_binary -> match lit1, lit2 with
-          | Pos x, _ when x = var -> SparseOctagon.BinaryMap.add (Pos x, lit2) (b + c) new_binary
-          | Neg x, _ when x = var -> SparseOctagon.BinaryMap.add (Neg x, lit2) (b - c) new_binary
-          | _, Pos x when x = var -> SparseOctagon.BinaryMap.add (lit1, Pos x) (b + c) new_binary
-          | _, Neg x when x = var -> SparseOctagon.BinaryMap.add (lit1, Neg x) (b - c) new_binary
-          |  _ -> SparseOctagon.BinaryMap.add (lit1, lit2) b new_binary
-        ) oct.binary SparseOctagon.BinaryMap.empty 
-      in {unary;binary;infl = SparseOctagon.rebuild_infl binary} (* kein subsumed nötig, da wir das octagon komplett in "x-Richtung" verschieben *)
-    
+    | exception Convert.Unsupported_CilExp _ -> forget_vars oct [var]
       
   let assign_var t v v' = failwith "SparseOctagonDomain.assign_var: not implemented"
   let assign_var_parallel t vvs = failwith "SparseOctagonDomain.assign_var_parallel: not implemented"
   let assign_var_parallel_with t vvs = failwith "SparseOctagonDomain.assign_var_parallel_with: not implemented"
   let assign_var_parallel' t vvs = failwith "SparseOctagonDomain.assign_var_parallel': not implemented"
   let substitute_exp ask t var exp no_ov = failwith "SparseOctagonDomain.substitute_exp: not implemented"
+  let cil_exp_of_lincons1 = failwith "TODO: suchen"
 
   (* ***************************** *)
   (* Module AssertionRels demands: *)
