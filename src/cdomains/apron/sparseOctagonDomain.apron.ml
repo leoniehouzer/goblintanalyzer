@@ -212,6 +212,44 @@ module Oct (Carrier : Carrier) = struct (* functor *)
   (** iterate over all pairs of elements in l1 and l2, applying f to each pair *)
   let iterate2 f a l1 l2 = List.fold_left (fun a x1 ->
       List.fold_left (fun a x2 -> f a x1 x2) a l2) a l1
+  
+  (* propagate2 aber nur für eine variable. nicht alle *)
+  let propagate2_var x m1 m2 infl = 
+    match UnaryMap.find_opt (Pos x) infl, UnaryMap.find_opt (Neg x) infl with (* find all influences for x and -x *)
+      | None,_
+      | _,None -> m1, m2, infl
+      | Some pl, Some nl -> 
+        let pl = LitSet.elements pl in (* convert sets of  x influenced Literals to lists *)
+        let nl = LitSet.elements nl in (* convert sets of -x influenced Literals to lists *)
+        iterate2 (fun (m1, m2, infl) v1 v2 -> (* iterate on crossproduct of the influenced lists, v1 positive, v2 negative *)
+            let p1 = normal (Pos x, v1) in (* setup normalized pairs, connected via pos/neg x *)
+            let p2 = normal (Neg x, v2) in
+            match BinaryMap.find_opt p1 m2, BinaryMap.find_opt p2 m2 with (* lookup the bounds b1, b2 for these pairs *)
+            | None, _  
+            | _, None -> failwith (Carrier.string_of x ^ " :\t" ^ string_of_lit Carrier.string_of v1 ^ string_of_lit Carrier.string_of v2 ^ "\n m2 should have value for p1!")
+            | Some b1, Some b2 -> let b = b1 + b2 in (* calculate the bound b for v1+v2 ≤ b*)
+              (* checks and updates *)
+              if v1 = negate v2 then (* we connected x-y ≤ b1 and y-x ≤ b2 *)
+                if b < 0 then raise Bot (* bottom check, due to y-y < 0 *)
+                else m1, m2, infl
+              else if v1 = v2 then   (* we connected x+y ≤ b1 and x-y ≤ b2  ⇒ 2y ≤ b *)
+                let b = b/2 in (match add_min m1 v1 b with (*  add y ≤ b/2  *)
+                    | Some false, m1 -> m1, m2, infl
+                    | None, m1
+                    | Some true, m1 -> check1 m1 v1 b;
+                      (m1, m2, infl))
+              else (* v1 ≠ v2 and v1 ≠ -v2 *) 
+                let p = normal (v1, v2) in
+                (match add2_min m2 p b with (* add v1+v2 ≤ b *)
+                 | Some false, m2 -> m1, m2, infl
+                 | Some true, m2 -> check2 m2 p b;
+                   (m1, m2, infl)
+                 | None, m2 -> check2 m2 p b; 
+                   let infl = add_elem v1 v2 infl in
+                   let infl = add_elem v2 v1 infl in
+                   m1, m2, infl
+                )) (m1, m2, infl) pl nl
+
 
   (** Closure provided by following the binary constraints through chains of x/-x occuring in some lhs of a oct-constraint*)
   let propagate2 (set, m1, m2, infl) = VarSet.fold (fun x (m1, m2, infl) ->
@@ -617,29 +655,6 @@ struct
         ) in
     doit m1 l1 l2
 
-  (** enrich binary bounds by summing up unaries *) (* ist jetz oben *)
-  (* let complete ({unary; binary; infl} : SparseOctagon.t) = 
-    let l1 = SparseOctagon.UnaryMap.bindings unary in (* l1 = list of all unary bounds *)
-    let binary, infl = (* cross-product of all unary bounds *)
-      List.fold_left (fun (m2, infl) (v1, b1) ->
-          List.fold_left (fun (m2, infl) (v2, b2) -> (* ignore same-variable bounds *)
-              if      SparseOctagon.LitV.compare v1         v2  = 0 then (m2, infl)
-              else if SparseOctagon.LitV.compare v1 (negate v2) = 0 then (m2, infl)
-              else
-                let p = SparseOctagon.normal (v1, v2) in (* synthesize binary constraints from unary ones *)
-                match SparseOctagon.add2_min m2 p (b1 + b2) with  (* collect v1+v2 ≤ b1 + b2 *)
-                | None, m2 -> 
-                  let infl = SparseOctagon.add_elem v1 v2 infl in
-                  let infl = SparseOctagon.add_elem v2 v1 infl in
-                  SparseOctagon.check2 m2 p (b1 + b2); (* probably, superfluous! *)
-                  m2, infl
-                | Some false, m2 -> m2, infl
-                | Some true, m2 -> SparseOctagon.check2 m2 p (b1 + b2); (* probably, superfluous! *)
-                  m2, infl)
-            (m2, infl) l1) 
-        (binary, infl) l1 in
-    ({unary; binary; infl} : SparseOctagon.t) *)
-  
 (** oct1 ⊔ oct2 as convex hull *)
   let cup (o1: SparseOctagon.t) (o2: SparseOctagon.t) = 
     let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
@@ -859,6 +874,23 @@ struct
         in
         {t with d = Some {unary; binary; infl = SparseOctagon.rebuild_infl binary}} (* kein subsumed nötig, da wir das octagon komplett in "x-Richtung" verschieben *)
 
+  let assign_var_and_const var minus exp_var c (t : VarManagement.t) = 
+    match t.d with
+    | None -> t
+    | Some oct ->    
+      let x = Environment.dim_of_var t.env var in
+      let oct1 = SparseOctagon.forget_var x (Some oct) in
+      match oct1 with
+      | None -> t (* bot bleibt bot *)
+      | Some oct1 ->
+        let y = Environment.dim_of_var t.env exp_var in
+        if minus then let binary = (SparseOctagon.BinaryMap.add ((SparseOctagon.normal (Pos x, Pos y)) c) oct1.binary |>  SparseOctagon.BinaryMap.add ((SparseOctagon.normal (Neg x, Neg y)) c) oct1.binary)
+        else let binary = (SparseOctagon.BinaryMap.add ((SparseOctagon.normal (Pos x, Neg y)) c) oct1.binary |>  SparseOctagon.BinaryMap.add ((SparseOctagon.normal (Neg x, Pos y)) c) oct1.binary)
+      (* TODO: zu infl hinzufügen *)  
+      in let oct2 = propagate2_var y oct1.unary binary oct1.infl in
+      {t with d = Some oct2}
+      
+
   (* aus LTVE, aber überarbeitet. *)
   (** Assign texpr to var in the octagon domain, for the cases ±x + c  or  c. All other cases lead to forget_var *)
   let assign_texpr (t: VarManagement.t) var texp =
@@ -869,21 +901,21 @@ struct
       begin match simplify_to_ref_and_offset t texp with
         | Some (None, c) -> assign_const var (Z.to_int c) t (* case: var := c*) 
         | Some (Some (coeff_var,exp_var), off) when var_i = exp_var -> substitute_exp var (Z.equal coeff_var Z.minus_one) (Z.to_int off) t (* case: var := ±var + c *) 
-        | Some (Some (coeff_var,exp_var), off) -> (* case: var := ±var' + c *) 
-            failwith "TODO: funktion erstellen und hier einbinden"
-        | _ -> failwith "TODO: forget_var machen"
+        | Some (Some (coeff_var,exp_var), off) -> assign_var_and_const var (Z.equal coeff_var Z.minus_one) exp_var (Z.to_int off) t (* case: var := ±var' + c *) 
+        | _ -> forget_vars t [var] (* all other cases: var := texp, where texp is not of the form ±x + c or c, so we forget var *)
       end
 
   (* no_ov -> no overflow
     if it's true then there is no overflow
     -> Convert.texpr1_expr_of_cil_exp handles overflow *)
   (* übernommen aus linearTwoVarEqualityDomain.apron.ml *)
-  let assign_exp ask (oct: VarManagement.t) var exp (no_ov: bool Lazy.t) : VarManagement.t =
-    let t = if not @@ Environment.mem_var oct.env var then add_vars oct [var] else oct in
+  let assign_exp ask (t: VarManagement.t) var exp (no_ov: bool Lazy.t) : VarManagement.t =
+    let t = if not @@ Environment.mem_var t.env var then add_vars t [var] else t in
     match Convert.texpr1_expr_of_cil_exp ask t t.env exp no_ov with
     | texp -> assign_texpr t var texp
-    | exception Convert.Unsupported_CilExp _ -> forget_vars oct [var]
-      
+    | exception Convert.Unsupported_CilExp _ -> forget_vars t [var]
+  
+  (* TODO: Was sollen diese Funktionen machen? *)
   let assign_var t v v' = failwith "SparseOctagonDomain.assign_var: not implemented"
   let assign_var_parallel t vvs = failwith "SparseOctagonDomain.assign_var_parallel: not implemented"
   let assign_var_parallel_with t vvs = failwith "SparseOctagonDomain.assign_var_parallel_with: not implemented"
