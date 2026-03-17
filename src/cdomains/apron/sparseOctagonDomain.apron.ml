@@ -889,7 +889,7 @@ struct
   let assign_var_parallel_with t vvs = failwith "SparseOctagonDomain.assign_var_parallel_with: not implemented"
   let assign_var_parallel' t vvs = failwith "SparseOctagonDomain.assign_var_parallel': not implemented"
   let substitute_exp ask t var exp no_ov = failwith "SparseOctagonDomain.substitute_exp: not implemented"
-  let cil_exp_of_lincons1 = failwith "TODO: suchen"
+  let cil_exp_of_lincons1 = Convert.cil_exp_of_lincons1
 
   (* ***************************** *)
   (* Module AssertionRels demands: *)
