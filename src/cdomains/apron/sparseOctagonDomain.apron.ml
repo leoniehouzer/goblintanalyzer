@@ -151,7 +151,6 @@ module Oct (Carrier : Carrier) = struct (* functor *)
 
   (** rebuild the influence graph from the binary bounds map *)
   let rebuild_infl binary = (* über binary iterieren, und beide richtungen zu "leerer" infl hinzufügen *)
-  (* TODO: werden beide richtungen gespeichert? überlegen! achtung auch bei der precondition von add_elem *)
     BinaryMap.fold (
       fun (lit1, lit2) _ new_infl -> add_elem lit2 lit1 (add_elem lit1 lit2 new_infl)
     ) binary UnaryMap.empty  
@@ -874,7 +873,7 @@ struct
         in
         {t with d = Some {unary; binary; infl = SparseOctagon.rebuild_infl binary}} (* kein subsumed nötig, da wir das octagon komplett in "x-Richtung" verschieben *)
 
-  let assign_var_and_const var minus exp_var c (t : VarManagement.t) = 
+  let assign_var_and_const var minus y c (t : VarManagement.t) = 
     match t.d with
     | None -> t
     | Some oct ->    
@@ -883,13 +882,21 @@ struct
       match oct1 with
       | None -> t (* bot bleibt bot *)
       | Some oct1 ->
-        let y = Environment.dim_of_var t.env exp_var in
-        if minus then let binary = (SparseOctagon.BinaryMap.add ((SparseOctagon.normal (Pos x, Pos y)) c) oct1.binary |>  SparseOctagon.BinaryMap.add ((SparseOctagon.normal (Neg x, Neg y)) c) oct1.binary)
-        else let binary = (SparseOctagon.BinaryMap.add ((SparseOctagon.normal (Pos x, Neg y)) c) oct1.binary |>  SparseOctagon.BinaryMap.add ((SparseOctagon.normal (Neg x, Pos y)) c) oct1.binary)
-      (* TODO: zu infl hinzufügen *)  
-      in let oct2 = propagate2_var y oct1.unary binary oct1.infl in
-      {t with d = Some oct2}
-      
+        if minus 
+          then
+            let binary = SparseOctagon.BinaryMap.add (SparseOctagon.normal (Pos x, Pos y)) c oct1.binary in
+            let binary = SparseOctagon.BinaryMap.add (SparseOctagon.normal (Neg x, Neg y)) c binary in
+            let infl = SparseOctagon.add_elem (Pos x) (Pos y) oct1.infl |> SparseOctagon.add_elem (Neg x) (Neg y) in
+            let infl = SparseOctagon.add_elem (Pos y) (Pos x) infl |> SparseOctagon.add_elem (Neg y) (Neg x) in
+            let (unary, binary, infl) = SparseOctagon.propagate2_var y oct1.unary binary infl 
+            in {t with d = Some {SparseOctagon.unary; binary; infl}}
+          else 
+            let binary = SparseOctagon.BinaryMap.add (SparseOctagon.normal (Pos x, Neg y)) c oct1.binary in
+            let binary = SparseOctagon.BinaryMap.add (SparseOctagon.normal (Neg x, Pos y)) c binary in
+            let infl = SparseOctagon.add_elem (Pos x) (Neg y) oct1.infl |> SparseOctagon.add_elem (Neg x) (Pos y) in
+            let infl = SparseOctagon.add_elem (Neg y) (Pos x) infl |> SparseOctagon.add_elem (Pos y) (Neg x) in
+            let (unary, binary, infl) = SparseOctagon.propagate2_var y oct1.unary binary infl 
+            in {t with d = Some {SparseOctagon.unary; binary; infl}}
 
   (* aus LTVE, aber überarbeitet. *)
   (** Assign texpr to var in the octagon domain, for the cases ±x + c  or  c. All other cases lead to forget_var *)
