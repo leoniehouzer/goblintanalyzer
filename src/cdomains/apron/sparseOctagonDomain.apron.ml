@@ -828,7 +828,8 @@ struct
       match oct1 with
       | Some oct1 ->
         let unary = SparseOctagon.UnaryMap.add (Pos x) c oct1.unary |> SparseOctagon.UnaryMap.add (Neg x) (-c) in 
-        let oct2 = { oct1 with SparseOctagon.unary = unary } in
+        let infl,binary = SparseOctagon.optimize unary oct1.binary oct1.infl in
+        let oct2 = {SparseOctagon.unary; binary; infl} in
         {t with d = Some oct2}
       | None -> t (* bot bleibt bot *)
   
@@ -888,15 +889,17 @@ struct
             let binary = SparseOctagon.BinaryMap.add (SparseOctagon.normal (Neg x, Neg y)) c binary in
             let infl = SparseOctagon.add_elem (Pos x) (Pos y) oct1.infl |> SparseOctagon.add_elem (Neg x) (Neg y) in
             let infl = SparseOctagon.add_elem (Pos y) (Pos x) infl |> SparseOctagon.add_elem (Neg y) (Neg x) in
-            let (unary, binary, infl) = SparseOctagon.propagate2_var y oct1.unary binary infl 
-            in {t with d = Some {SparseOctagon.unary; binary; infl}}
+            let (unary, binary, infl) = SparseOctagon.propagate2_var y oct1.unary binary infl in
+            let infl,binary = SparseOctagon.optimize unary binary infl in
+            {t with d = Some {SparseOctagon.unary; binary; infl}}
           else 
             let binary = SparseOctagon.BinaryMap.add (SparseOctagon.normal (Pos x, Neg y)) c oct1.binary in
             let binary = SparseOctagon.BinaryMap.add (SparseOctagon.normal (Neg x, Pos y)) c binary in
             let infl = SparseOctagon.add_elem (Pos x) (Neg y) oct1.infl |> SparseOctagon.add_elem (Neg x) (Pos y) in
             let infl = SparseOctagon.add_elem (Neg y) (Pos x) infl |> SparseOctagon.add_elem (Pos y) (Neg x) in
-            let (unary, binary, infl) = SparseOctagon.propagate2_var y oct1.unary binary infl 
-            in {t with d = Some {SparseOctagon.unary; binary; infl}}
+            let (unary, binary, infl) = SparseOctagon.propagate2_var y oct1.unary binary infl in
+            let infl,binary = SparseOctagon.optimize unary binary infl in
+            {t with d = Some {SparseOctagon.unary; binary; infl}}
 
   (* aus LTVE, aber überarbeitet. *)
   (** Assign texpr to var in the octagon domain, for the cases ±x + c  or  c. All other cases lead to forget_var *)
