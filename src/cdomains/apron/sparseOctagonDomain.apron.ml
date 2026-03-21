@@ -612,7 +612,7 @@ struct
     let (set, m1, m2, infl) = SparseOctagon.init (unary, binary, infl) list in
     let (m1, binary, infl) = SparseOctagon.propagate2 (set, m1, m2, infl) in
     let unary = SparseOctagon.propagate1 (m1, binary, infl) in
-    (* TODO: evaluate, whether optimize would be a good idea here, or whether propagate1/2 are even necessary*)
+    (* TOD0: evaluate, whether optimize would be a good idea here, or whether propagate1/2 are even necessary*)
     ({unary; binary; infl} : SparseOctagon.t)
 
   (**
@@ -678,10 +678,10 @@ struct
     Some ({unary; binary; infl} : SparseOctagon.t) *)
 
   (* (** oct1 ⊔ oct2 as convex hull *)
-   let cup o1 o2  = (* TODO *)
-      (* TODO: was ist mit dingen die implizit gelten? *)
-      (* TODO: wozu brauchen wir complete? was ist mit dingen, die implizit gelten? *)
-      (* TODO: was ist, wenn sich dinge widersprechen? *)
+   let cup o1 o2  = 
+      (*  was ist mit dingen die implizit gelten? *)
+      (* wozu brauchen wir complete? was ist mit dingen, die implizit gelten? *)
+      (*  was ist, wenn sich dinge widersprechen? *)
       let {unary; binary; infl} : SparseOctagon.t = SparseOctagon.strong_closure o1 in  (* full closure on o1 *)
       let {unary = unary2; binary = binary2} : SparseOctagon.t = SparseOctagon.strong_closure o2 in  (* full closure on o2 *)
       (* BinaryMap.bindings is a pair-ordered list *)
@@ -692,7 +692,7 @@ struct
       let l1 = SparseOctagon.UnaryMap.bindings unary in
       let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
       let unary = cup_list l1 l2 in             (*  unary1 ⊔ unary2  *)
-      (* TODO: Do we need to think about calling optimize to get rid of redundant pair bounds?*)
+      (* TOD0: Do we need to think about calling optimize to get rid of redundant pair bounds?*)
       Some ({unary; binary; infl} : SparseOctagon.t) *)
 
   (* *************************** *)
@@ -943,6 +943,7 @@ struct
   let env t = t.env
   let eval_interval ask = Bounds.bound_texpr
   let invariant t = failwith "SparseOctagonDomain.invariant: not implemented"
+  
   type marshal = t
   (* marshal is not compatible with apron, therefore we don't have to implement it *)
   let marshal t = t
