@@ -403,7 +403,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
       let new_unary = (UnaryMap.remove (Pos x) (UnaryMap.remove (Neg x) unary)) in
       let (new_unary, new_binary, infl) = forget_var_binary x new_unary binary infl in
       let new_infl = (rebuild_infl new_binary) in 
-      let new_infl,new_binary = optimize new_unary new_binary infl in
+      let new_infl,new_binary = optimize new_unary new_binary new_infl in
       Some {unary = new_unary ; binary = new_binary; infl = new_infl}) 
 
   let list_of = function 
