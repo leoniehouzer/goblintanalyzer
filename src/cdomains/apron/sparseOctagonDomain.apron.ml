@@ -664,7 +664,7 @@ struct
    * preconditions: 
    * - l1 and l2 ordered wrt. pair order
   *)
-  let cap_list2 l1 l2 = (* todo *)
+  let cap_list2 l1 l2 =
     let m2 = SparseOctagon.BinaryMap.empty in
     let infl = SparseOctagon.UnaryMap.empty in
     let rec doit (m2, infl) l1 l2 = match l1, l2 with
