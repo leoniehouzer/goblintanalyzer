@@ -330,6 +330,30 @@ module Oct (Carrier : Carrier) = struct (* functor *)
             (m2, infl) l1) 
         (binary, infl) l1 in
     {unary; binary; infl}
+
+  (* basically complete, but only does the unary bounds given in the list unary2 *)
+  let complete_partially {unary; binary; infl} unary2 = 
+    let l1 = UnaryMap.bindings unary in (* l1 = list of all unary bounds *)
+    let l2 = UnaryMap.bindings unary2 in
+    let binary, infl = (* cross-product of all unary bounds *)
+      List.fold_left (fun (m2, infl) (v1, b1) ->
+          List.fold_left (fun (m2, infl) (v2, b2) -> (* ignore same-variable bounds *)
+              if      LitV.compare v1         v2  = 0 then (m2, infl)
+              else if LitV.compare v1 (negate v2) = 0 then (m2, infl)
+              else
+                let p = normal (v1, v2) in (* synthesize binary constraints from unary ones *)
+                match add2_min m2 p (b1 + b2) with  (* collect v1+v2 ≤ b1 + b2 *)
+                | None, m2 -> 
+                  let infl = add_elem v1 v2 infl in
+                  let infl = add_elem v2 v1 infl in
+                  check2 m2 p (b1 + b2); (* probably, superfluous! *)
+                  m2, infl
+                | Some false, m2 -> m2, infl
+                | Some true, m2 -> check2 m2 p (b1 + b2); (* probably, superfluous! *)
+                  m2, infl)
+            (m2, infl) l2) 
+        (binary, infl) l1 in
+    {unary; binary; infl}
   
   let strong_closure oct = (* anschauen ob das so passt, evtl. neu machen *)
     let oct = complete oct in (* first enrich binary bounds by summing up unaries *)
@@ -608,12 +632,30 @@ struct
   (* *************************** *)
 
   (** oct ⊓ constraintlist implemented as a continuation of init *)
-  let cap_list ({unary; binary; infl} : SparseOctagon.t) list = 
+  (* let cap_list ({unary; binary; infl} : SparseOctagon.t) list = 
     let (set, m1, m2, infl) = SparseOctagon.init (unary, binary, infl) list in
     let (m1, binary, infl) = SparseOctagon.propagate2 (set, m1, m2, infl) in
     let unary = SparseOctagon.propagate1 (m1, binary, infl) in
     (* TOD0: evaluate, whether optimize would be a good idea here, or whether propagate1/2 are even necessary*)
-    ({unary; binary; infl} : SparseOctagon.t)
+    ({unary; binary; infl} : SparseOctagon.t) *)
+  
+  let cap_list l1 l2 = failwith "todo"
+
+  let cap_list2 l1 l2 = failwith "todo"
+
+
+  let cap (o1: SparseOctagon.t) (o2: SparseOctagon.t) = (* implementation basically wie cup_for_full_clousure *)
+    let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
+    let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
+    (* UnaryMap.bindings is a literal-ordered list *)
+    let l1 = SparseOctagon.UnaryMap.bindings unary1 in
+    let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
+    let unary = cap_list l1 l2 in             (*  unary1 ⊓ unary2  *)
+    (* BinaryMap.bindings is a pair-ordered list *)
+    let l1 = SparseOctagon.BinaryMap.bindings binary1 in
+    let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
+    let binary, infl = cap_list2 l1 l2 in     (* binary1 ⊓ binary2 *)
+    Some ({unary; binary; infl} : SparseOctagon.t)
 
   (**
    * process both binary bounds lists to collect the common maximum of both bounds
@@ -621,7 +663,8 @@ struct
    * - l1 and l2 ordered wrt. pair order
    * - all implied pair bounds must already have been provided!
   *)
-  let cup_list2 l1 l2 = let m2 = SparseOctagon.BinaryMap.empty in
+  let cup_list2 l1 l2 = 
+    let m2 = SparseOctagon.BinaryMap.empty in
     let infl = SparseOctagon.UnaryMap.empty in
     let rec doit (m2, infl) l1 l2 = match l1, l2 with
       | [], _ | _, [] -> m2, infl
@@ -655,16 +698,71 @@ struct
          |  _ -> doit m1 l1 t2
         ) in
     doit m1 l1 l2
+  
+  (** bekommt 2 octagons, returnt das unary von join, sowie beide octagons nachdem complete_partially gemacht wurde (wobei unary eig wegelassen werden kann) *)
+  let cup_unary (o1 : SparseOctagon.t) (o2 : SparseOctagon.t) =
+    let l1 = SparseOctagon.UnaryMap.bindings o1.unary in
+    let l2 = SparseOctagon.UnaryMap.bindings o2.unary in
+    let final_unary, u1, u2 = 
+      let rec doit m1 l1 l2 u1 u2 = match l1, l2 with
+        | [], [] -> (m1, u1, u2)
+        | [], (v2, b2) :: t2 -> let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in doit m1 l1 t2 u1 u2
+        | (v1, b1) :: t1, [] -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit m1 t1 l2 u1 u2
+        | (v1, b1) :: t1, (v2, b2) :: t2 -> 
+          (match SparseOctagon.LitV.compare v1 v2 with (* remove the smaller bounds wrt. variable order until we reach same variables *)
+          |  0 -> let m1 = SparseOctagon.UnaryMap.add v1 (max b1 b2) m1 in (* collect v1 ≤ b1 ⊔ b2 *)
+              if b1 <> b2 then (* falls die bound unterscheidlich sind, muss man das zu u1, u2 hinzufügen *)
+                let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in 
+                let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in
+                doit m1 t1 t2 u1 u2
+              else doit m1 t1 t2 u1 u2
+          | -1 -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit m1 t1 l2 u1 u2 
+          |  _ -> let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in doit m1 l1 t2 u1 u2 
+          ) in
+      doit SparseOctagon.UnaryMap.empty l1 l2 SparseOctagon.UnaryMap.empty SparseOctagon.UnaryMap.empty in
+    let new_o1 = SparseOctagon.complete_partially o1 u1 in
+    let new_o2 = SparseOctagon.complete_partially o2 u2 in
+    final_unary, new_o1, new_o2
 
-(** oct1 ⊔ oct2 as convex hull *)
   let cup (o1: SparseOctagon.t) (o2: SparseOctagon.t) = 
+    let final_unary, new_o1, new_o2 = 
+      let cup_unary (o1 : SparseOctagon.t) (o2 : SparseOctagon.t) =
+        let l1 = SparseOctagon.UnaryMap.bindings o1.unary in
+        let l2 = SparseOctagon.UnaryMap.bindings o2.unary in
+        let final_unary, u1, u2 = 
+          let rec doit m1 l1 l2 u1 u2 = match l1, l2 with
+            | [], [] -> (m1, u1, u2)
+            | [], (v2, b2) :: t2 -> let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in doit m1 l1 t2 u1 u2
+            | (v1, b1) :: t1, [] -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit m1 t1 l2 u1 u2
+            | (v1, b1) :: t1, (v2, b2) :: t2 -> 
+              (match SparseOctagon.LitV.compare v1 v2 with (* remove the smaller bounds wrt. variable order until we reach same variables *)
+              |  0 -> let m1 = SparseOctagon.UnaryMap.add v1 (max b1 b2) m1 in (* collect v1 ≤ b1 ⊔ b2 *)
+                  if b1 <> b2 then (* falls die bound unterscheidlich sind, muss man das zu u1, u2 hinzufügen *)
+                    let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in 
+                    let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in
+                    doit m1 t1 t2 u1 u2
+                  else doit m1 t1 t2 u1 u2
+              | -1 -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit m1 t1 l2 u1 u2 
+              |  _ -> let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in doit m1 l1 t2 u1 u2 
+              ) in
+          doit SparseOctagon.UnaryMap.empty l1 l2 SparseOctagon.UnaryMap.empty SparseOctagon.UnaryMap.empty in
+        let new_o1 = SparseOctagon.complete_partially o1 u1 in
+        let new_o2 = SparseOctagon.complete_partially o2 u2 in
+        final_unary, new_o1, new_o2 in
+      cup_unary o1 o2 in
+    let l1 = SparseOctagon.BinaryMap.bindings new_o1.binary in
+    let l2 = SparseOctagon.BinaryMap.bindings new_o2.binary in 
+    let final_binary, final_infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
+    Some {SparseOctagon.unary = final_unary; binary = final_binary; infl = final_infl} 
+
+  let cup_for_full_closure2 (o1: SparseOctagon.t) (o2: SparseOctagon.t) = 
     let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
     let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
     let unary = SparseOctagon.UnaryMap.fold (fun v b1 acc -> let b2 = SparseOctagon.UnaryMap.find v acc in SparseOctagon.UnaryMap.add v (max b1 b2) acc) unary1 SparseOctagon.UnaryMap.empty in
     let binary = SparseOctagon.BinaryMap.fold (fun v b1 acc -> let b2 = SparseOctagon.BinaryMap.find v acc in SparseOctagon.BinaryMap.add v (max b1 b2) acc) binary1 SparseOctagon.BinaryMap.empty in 
     Some {SparseOctagon.unary=unary; binary=binary; infl = SparseOctagon.rebuild_infl binary}
 
-(* let cup (o1: SparseOctagon.t) (o2: SparseOctagon.t) = (* verwendet cup_list und cup_list2*)
+  let cup_for_full_closure1 (o1: SparseOctagon.t) (o2: SparseOctagon.t) = (* verwendet cup_list und cup_list2*)
     let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
     let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
     (* UnaryMap.bindings is a literal-ordered list *)
@@ -675,25 +773,24 @@ struct
     let l1 = SparseOctagon.BinaryMap.bindings binary1 in
     let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
     let binary, infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
-    Some ({unary; binary; infl} : SparseOctagon.t) *)
+    Some ({unary; binary; infl} : SparseOctagon.t)
 
-  (* (** oct1 ⊔ oct2 as convex hull *)
-   let cup o1 o2  = 
-      (*  was ist mit dingen die implizit gelten? *)
-      (* wozu brauchen wir complete? was ist mit dingen, die implizit gelten? *)
-      (*  was ist, wenn sich dinge widersprechen? *)
-      let {unary; binary; infl} : SparseOctagon.t = SparseOctagon.strong_closure o1 in  (* full closure on o1 *)
-      let {unary = unary2; binary = binary2} : SparseOctagon.t = SparseOctagon.strong_closure o2 in  (* full closure on o2 *)
-      (* BinaryMap.bindings is a pair-ordered list *)
-      let l1 = SparseOctagon.BinaryMap.bindings binary in
-      let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
-      let binary, infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
-      (* UnaryMap.bindings is a literal-ordered list *)
-      let l1 = SparseOctagon.UnaryMap.bindings unary in
-      let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
-      let unary = cup_list l1 l2 in             (*  unary1 ⊔ unary2  *)
-      (* TOD0: Do we need to think about calling optimize to get rid of redundant pair bounds?*)
-      Some ({unary; binary; infl} : SparseOctagon.t) *)
+  let cup_naive_version o1 o2  = 
+    (*  was ist mit dingen die implizit gelten? *)
+    (* wozu brauchen wir complete? was ist mit dingen, die implizit gelten? *)
+    (*  was ist, wenn sich dinge widersprechen? *)
+    let {unary; binary; infl} : SparseOctagon.t = SparseOctagon.strong_closure o1 in  (* full closure on o1 *)
+    let {unary = unary2; binary = binary2} : SparseOctagon.t = SparseOctagon.strong_closure o2 in  (* full closure on o2 *)
+    (* BinaryMap.bindings is a pair-ordered list *)
+    let l1 = SparseOctagon.BinaryMap.bindings binary in
+    let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
+    let binary, infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
+    (* UnaryMap.bindings is a literal-ordered list *)
+    let l1 = SparseOctagon.UnaryMap.bindings unary in
+    let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
+    let unary = cup_list l1 l2 in             (*  unary1 ⊔ unary2  *)
+    (* TOD0: Do we need to think about calling optimize to get rid of redundant pair bounds?*)
+    Some ({unary; binary; infl} : SparseOctagon.t) 
 
   (* *************************** *)
   (* fixpoint iteration handling *)
@@ -707,7 +804,7 @@ struct
         with Bot -> None
     in
     { d = oct; env = octb.env }
-  
+
   let join a b = 
     match a.d,b.d with
     | None, _ -> b
@@ -718,8 +815,10 @@ struct
       let mod_b = SparseOctagon.dim_add (Environment.dimchange b.env sup_env) octb in
       {d=cup mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cup octa octb ; env = a.env} (* same environment, so we can just join the octagons*) 
- 
-  let leq a b =
+
+  let leq a b = failwith "todo"
+
+  let leq_for_full_closure a b =
     let env_comp = Environment.cmp a.env b.env in
     if env_comp = -2 || env_comp > 0 then false else
     if is_bot_env a || is_top b then true else
@@ -744,7 +843,7 @@ struct
         else let b1 = SparseOctagon.BinaryMap.find v binary1 in
         (max b1 b2) = b1
       ) binary2 true
-    
+ 
   let widen a b = failwith "SparseOctagonDomain.widen: not implemented"
   let narrow a b = failwith "SparseOctagonDomain.narrow: not implemented"
   let unify a b = failwith "SparseOctagonDomain.unify: not implemented"
@@ -761,7 +860,6 @@ struct
     else let newoct = List.fold (fun oct i-> forget_var i t) (t.d) vars in
       { d = newoct; env = t.env }
       
-
   (* aus LTVE, aber überarbeitet. *)
   (** Parses a Texpr to obtain a (coefficient, variable) pair list to repr. a sum of a variables that have a coefficient. If variable is None, the coefficient represents a constant offset. *)
   let monomials_from_texp (t: t) texp =
@@ -773,7 +871,7 @@ struct
     in
     let rec convert_texpr texp =
       begin match texp with
-        | Cst (Interval _) -> failwith "constant was an interval; this is not supported" (* TODO: aber hier ist interval doch supportet oder? *)
+        | Cst (Interval _) -> failwith "constant was an interval; this is not supported"
         | Cst (Scalar x) -> 
           begin match SharedFunctions.int_of_scalar ?round:None x with
             | Some x -> [(None, x)]
@@ -838,7 +936,7 @@ struct
   (** assign case:  var := +- var + c   (c is a number, possibly negative)
       if minus is true, then var := -var + c, else var := +var + c 
   *)
-  let substitute_exp (var : Var.t) minus c (t : VarManagement.t) : VarManagement.t = 
+  let substitute_expr (var : Var.t) minus c (t : VarManagement.t) : VarManagement.t = (* umbenennen *)
     match t.d with
     | None -> t
     | Some oct ->
@@ -912,7 +1010,7 @@ struct
       let var_i = Environment.dim_of_var t.env var (* this is the variable we are assigning to *) in
       begin match simplify_to_ref_and_offset t texp with
         | Some (None, c) -> assign_const var (Z.to_int c) t (* case: var := c*) 
-        | Some (Some (coeff_var,exp_var), off) when var_i = exp_var -> substitute_exp var (Z.equal coeff_var Z.minus_one) (Z.to_int off) t (* case: var := ±var + c *) 
+        | Some (Some (coeff_var,exp_var), off) when var_i = exp_var -> substitute_expr var (Z.equal coeff_var Z.minus_one) (Z.to_int off) t (* case: var := ±var + c *) 
         | Some (Some (coeff_var,exp_var), off) -> assign_var_and_const var (Z.equal coeff_var Z.minus_one) exp_var (Z.to_int off) t (* case: var := ±var' + c *) 
         | _ -> forget_vars t [var] (* all other cases: var := texp, where texp is not of the form ±x + c or c, so we forget var *)
       end
@@ -927,12 +1025,39 @@ struct
     | texp -> assign_texpr t var texp
     | exception Convert.Unsupported_CilExp _ -> forget_vars t [var]
   
-  (* TODO: Was sollen diese Funktionen machen? *)
-  let assign_var t v v' = failwith "SparseOctagonDomain.assign_var: not implemented"
-  let assign_var_parallel t vvs = failwith "SparseOctagonDomain.assign_var_parallel: not implemented"
-  let assign_var_parallel_with t vvs = failwith "SparseOctagonDomain.assign_var_parallel_with: not implemented"
-  let assign_var_parallel' t vvs = failwith "SparseOctagonDomain.assign_var_parallel': not implemented"
-  let substitute_exp ask t var exp no_ov = failwith "SparseOctagonDomain.substitute_exp: not implemented"
+  (* diese funktionen konnte ich 1 zu 1 aus linearTwoVarEqualityDomain.apron.ml übernehmen *)
+  let assign_var (t: VarManagement.t) v v' =
+    let t = add_vars t [v; v'] in
+    assign_texpr t v (Var v')
+
+  let assign_var_parallel t vv's =
+    let assigned_vars = List.map fst vv's in
+    let t = add_vars t assigned_vars in
+    let primed_vars = List.init (List.length assigned_vars) (fun i -> Var.of_string (Int.to_string i  ^"'")) in (* TODO: we use primed vars in analysis, conflict? *)
+    let t_primed = add_vars t primed_vars in
+    let multi_t = List.fold_left2 (fun t' v_prime (_,v') -> assign_var t' v_prime v') t_primed primed_vars vv's in
+    match multi_t.d with
+    | Some arr when not @@ is_top multi_t ->
+      let switched_arr = List.fold_left2 (fun multi_t assigned_var primed_var-> assign_var multi_t assigned_var primed_var) multi_t assigned_vars primed_vars in
+      remove_vars switched_arr primed_vars
+    | _ -> t
+    
+  let assign_var_parallel_with t vv's =
+    (* TODO: If we are angling for more performance, this might be a good place ot try. `assign_var_parallel_with` is used whenever a function is entered (body),
+       in unlock, at sync edges, and when entering multi-threaded mode. *)
+    let t' = assign_var_parallel t vv's in
+    t.d <- t'.d;
+    t.env <- t'.env
+
+  let assign_var_parallel' t vs1 vs2 =
+    let vv's = List.combine vs1 vs2 in
+    assign_var_parallel t vv's
+
+  let substitute_exp ask t var exp no_ov =
+    let t = if not @@ Environment.mem_var t.env var then add_vars t [var] else t in
+    let res = assign_exp ask t var exp no_ov in
+    forget_vars res [var] (* forget_vars statt forget_var wegen dem type *) 
+    
   let cil_exp_of_lincons1 = Convert.cil_exp_of_lincons1
 
   (* ***************************** *)
