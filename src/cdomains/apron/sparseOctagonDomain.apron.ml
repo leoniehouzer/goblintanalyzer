@@ -644,16 +644,18 @@ struct
    * preconditions: 
    * - l1 and l2 ordered wrt. literal order
   *)
-  let cap_list l1 l2 =  (* todo *)
+  let cap_list l1 l2 =  
     let m1 = SparseOctagon.UnaryMap.empty in        (* initialize with empty unary bounds *)
     let rec doit m1 l1 l2 = match l1, l2 with
-      | [], _ | _, [] -> m1
+      | [], [] -> m1
+      | [], (v2, b2) :: t2 -> let m1 = SparseOctagon.UnaryMap.add v2 b2 m1 in doit m1 [] t2
+      | (v1, b1) :: t1, [] -> let m1 = SparseOctagon.UnaryMap.add v1 b1 m1 in doit m1 t1 []
       | (v1, b1) :: t1, (v2, b2) :: t2 -> 
         (match SparseOctagon.LitV.compare v1 v2 with (* remove the smaller bounds wrt. variable order until we reach same variables *)
-         | -1 -> doit m1 t1 l2
-         |  0 -> let m1 = SparseOctagon.UnaryMap.add v1 (max b1 b2) m1 in (* collect v1 ≤ b1 ⊔ b2 *)
+         |  0 -> let m1 = SparseOctagon.UnaryMap.add v1 (min b1 b2) m1 in (* collect v1 ≤ b1 ⊓ b2 *)
            doit m1 t1 t2
-         |  _ -> doit m1 l1 t2
+         | -1 -> let m1 = SparseOctagon.UnaryMap.add v1 b1 m1 in doit m1 t1 l2 
+         |  _ -> let m1 = SparseOctagon.UnaryMap.add v2 b2 m1 in doit m1 l1 t2 
         ) in
     doit m1 l1 l2
 
@@ -666,11 +668,13 @@ struct
     let m2 = SparseOctagon.BinaryMap.empty in
     let infl = SparseOctagon.UnaryMap.empty in
     let rec doit (m2, infl) l1 l2 = match l1, l2 with
-      | [], _ | _, [] -> m2, infl
+      | [] , [] -> m2, infl
+      | [], (p2, b2)::t2 -> failwith "todo"
+      | (p1, b1)::t1, [] -> failwith "todo"
       | (p1, b1)::t1, (p2, b2)::t2 -> 
         (match SparseOctagon.PairLV.compare p1 p2 with (* remove the smaller bounds wrt. pair order until we reach same pairs *)
          | -1 -> doit (m2,infl) t1 l2
-         |  0 -> let m2 = SparseOctagon.BinaryMap.add p1 (max b1 b2) m2 in (* collect p1 ≤ b1 ⊔ b2 *)
+         |  0 -> let m2 = SparseOctagon.BinaryMap.add p1 (max b1 b2) m2 in (* collect p1 ≤ b1 ⊓ b2 *)
            let (v1, v2) = p1 in
            let infl = SparseOctagon.add_elem v1 v2 infl in (* make sure to record infl sets *)
            let infl = SparseOctagon.add_elem v2 v1 infl in
@@ -1078,7 +1082,7 @@ struct
   let assign_var_parallel t vv's =
     let assigned_vars = List.map fst vv's in
     let t = add_vars t assigned_vars in
-    let primed_vars = List.init (List.length assigned_vars) (fun i -> Var.of_string (Int.to_string i  ^"'")) in (* TODO: we use primed vars in analysis, conflict? *)
+    let primed_vars = List.init (List.length assigned_vars) (fun i -> Var.of_string (Int.to_string i  ^"'")) in (* TOD0: we use primed vars in analysis, conflict? *)
     let t_primed = add_vars t primed_vars in
     let multi_t = List.fold_left2 (fun t' v_prime (_,v') -> assign_var t' v_prime v') t_primed primed_vars vv's in
     match multi_t.d with
@@ -1088,7 +1092,7 @@ struct
     | _ -> t
     
   let assign_var_parallel_with t vv's =
-    (* TODO: If we are angling for more performance, this might be a good place ot try. `assign_var_parallel_with` is used whenever a function is entered (body),
+    (* TOD0: If we are angling for more performance, this might be a good place ot try. `assign_var_parallel_with` is used whenever a function is entered (body),
        in unlock, at sync edges, and when entering multi-threaded mode. *)
     let t' = assign_var_parallel t vv's in
     t.d <- t'.d;
