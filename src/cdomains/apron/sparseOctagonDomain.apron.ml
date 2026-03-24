@@ -839,8 +839,7 @@ struct
         with Bot -> None
     in
     { d = oct; env = octb.env }
-
-  let meet = (* same as join but calls cap instead of cup *)
+  let meet a b = (* same as join but calls cap instead of cup *)
     match a.d,b.d with
     | None, _ -> b
     | _, None -> a
