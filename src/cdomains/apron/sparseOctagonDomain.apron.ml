@@ -669,17 +669,37 @@ struct
     let infl = SparseOctagon.UnaryMap.empty in
     let rec doit (m2, infl) l1 l2 = match l1, l2 with
       | [] , [] -> m2, infl
-      | [], (p2, b2)::t2 -> failwith "todo"
-      | (p1, b1)::t1, [] -> failwith "todo"
+      | [], (p2, b2)::t2 -> 
+        let m2 = SparseOctagon.BinaryMap.add p2 b2 m2 in 
+        let (v1, v2) = p2 in
+        let infl = SparseOctagon.add_elem v1 v2 infl in 
+        let infl = SparseOctagon.add_elem v2 v1 infl in
+        doit (m2, infl) [] t2
+      | (p1, b1)::t1, [] -> 
+        let m2 = SparseOctagon.BinaryMap.add p1 b1 m2 in 
+        let (v1, v2) = p1 in
+        let infl = SparseOctagon.add_elem v1 v2 infl in 
+        let infl = SparseOctagon.add_elem v2 v1 infl in
+        doit (m2, infl) t1 []
       | (p1, b1)::t1, (p2, b2)::t2 -> 
         (match SparseOctagon.PairLV.compare p1 p2 with (* remove the smaller bounds wrt. pair order until we reach same pairs *)
-         | -1 -> doit (m2,infl) t1 l2
-         |  0 -> let m2 = SparseOctagon.BinaryMap.add p1 (max b1 b2) m2 in (* collect p1 ≤ b1 ⊓ b2 *)
+         |  0 -> let m2 = SparseOctagon.BinaryMap.add p1 (min b1 b2) m2 in (* collect p1 ≤ b1 ⊓ b2 *)
            let (v1, v2) = p1 in
            let infl = SparseOctagon.add_elem v1 v2 infl in (* make sure to record infl sets *)
            let infl = SparseOctagon.add_elem v2 v1 infl in
            doit (m2, infl) t1 t2
-         |  _ -> doit (m2, infl) l1 t2
+         | -1 -> 
+            let m2 = SparseOctagon.BinaryMap.add p1 b1 m2 in 
+            let (v1, v2) = p1 in
+            let infl = SparseOctagon.add_elem v1 v2 infl in 
+            let infl = SparseOctagon.add_elem v2 v1 infl in
+            doit (m2, infl) t1 []
+         |  _ -> 
+            let m2 = SparseOctagon.BinaryMap.add p2 b2 m2 in 
+            let (v1, v2) = p2 in
+            let infl = SparseOctagon.add_elem v1 v2 infl in 
+            let infl = SparseOctagon.add_elem v2 v1 infl in
+            doit (m2, infl) [] t2
         ) in
     doit (m2, infl) l1 l2
 
