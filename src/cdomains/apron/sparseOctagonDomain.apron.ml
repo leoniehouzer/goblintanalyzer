@@ -885,6 +885,21 @@ struct
       {d=cup mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cup octa octb ; env = a.env} (* same environment, so we can just join the octagons*) 
 
+  let rec doit l1 l2 u1 u2 = match l1, l2 with (* funktioniert ähnloch wie in cup_unary, aber gibt Nonen zurück wenns nicht passt. *)
+    | [], [] ->  Some (u1, u2)
+    | [], (v2, b2) :: t2 -> None
+    | (v1, b1) :: t1, [] -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit t1 l2 u1 u2
+    | (v1, b1) :: t1, (v2, b2) :: t2 -> 
+      (match SparseOctagon.LitV.compare v1 v2 with (* remove the smaller bounds wrt. variable order until we reach same variables *)
+      |  0 -> if b1 <> b2 then (* falls die bound unterscheidlich sind, muss man das zu u1, u2 hinzufügen *)
+            let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in 
+            let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in
+            doit t1 t2 u1 u2
+          else doit t1 t2 u1 u2
+      | -1 -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit t1 l2 u1 u2 
+      |  _ -> None
+      ) 
+
   let leq a b = 
     let env_comp = Environment.cmp a.env b.env in
     if env_comp = -2 || env_comp > 0 then false else
@@ -910,21 +925,6 @@ struct
         else let b1 = SparseOctagon.BinaryMap.find v new_o1.binary in
         (max b1 b2) = b1
       ) new_o2.binary true
-
-  let rec doit l1 l2 u1 u2 = match l1, l2 with (* funktioniert ähnloch wie in cup_unary, aber gibt Nonen zurück wenns nicht passt. *)
-    | [], [] ->  Some (u1, u2)
-    | [], (v2, b2) :: t2 -> None
-    | (v1, b1) :: t1, [] -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit t1 l2 u1 u2
-    | (v1, b1) :: t1, (v2, b2) :: t2 -> 
-      (match SparseOctagon.LitV.compare v1 v2 with (* remove the smaller bounds wrt. variable order until we reach same variables *)
-      |  0 -> if b1 <> b2 then (* falls die bound unterscheidlich sind, muss man das zu u1, u2 hinzufügen *)
-            let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in 
-            let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in
-            doit t1 t2 u1 u2
-          else doit t1 t2 u1 u2
-      | -1 -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit t1 l2 u1 u2 
-      |  _ -> None
-      ) 
 
   let leq_for_full_closure a b =
     let env_comp = Environment.cmp a.env b.env in
