@@ -896,7 +896,7 @@ struct
     (* jetzt haben beide octagons die selben variablennummern, also x hat in beiden z.B. die nummer 1 *)
     let {SparseOctagon.unary=unary1; binary=binary1; _} = oct1' in
     let {SparseOctagon.unary=unary2; binary=binary2; _} = oct2 in
-    (* unarys vergleichen: *)  
+    (* unarys vergleichen:  *)  
     let l1 = SparseOctagon.UnaryMap.bindings unary1 in
     let l2 = SparseOctagon.UnaryMap.bindings unary2 in
     match (doit l1 l2 SparseOctagon.UnaryMap.empty SparseOctagon.UnaryMap.empty) with
