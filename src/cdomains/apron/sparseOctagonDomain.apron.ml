@@ -632,17 +632,52 @@ struct
   (* *************************** *)
 
   (** oct ⊓ constraintlist implemented as a continuation of init *)
-  (* let cap_list ({unary; binary; infl} : SparseOctagon.t) list = 
+  let cap_list_old ({unary; binary; infl} : SparseOctagon.t) list = (* old implementation of cap_list; meet origionally called this function *)
     let (set, m1, m2, infl) = SparseOctagon.init (unary, binary, infl) list in
     let (m1, binary, infl) = SparseOctagon.propagate2 (set, m1, m2, infl) in
     let unary = SparseOctagon.propagate1 (m1, binary, infl) in
     (* TOD0: evaluate, whether optimize would be a good idea here, or whether propagate1/2 are even necessary*)
-    ({unary; binary; infl} : SparseOctagon.t) *)
+    ({unary; binary; infl} : SparseOctagon.t)
   
-  let cap_list l1 l2 = failwith "todo"
+  (**
+   * process both unary bounds lists to collect the common minimum of both bounds
+   * preconditions: 
+   * - l1 and l2 ordered wrt. literal order
+  *)
+  let cap_list l1 l2 =  (* todo *)
+    let m1 = SparseOctagon.UnaryMap.empty in        (* initialize with empty unary bounds *)
+    let rec doit m1 l1 l2 = match l1, l2 with
+      | [], _ | _, [] -> m1
+      | (v1, b1) :: t1, (v2, b2) :: t2 -> 
+        (match SparseOctagon.LitV.compare v1 v2 with (* remove the smaller bounds wrt. variable order until we reach same variables *)
+         | -1 -> doit m1 t1 l2
+         |  0 -> let m1 = SparseOctagon.UnaryMap.add v1 (max b1 b2) m1 in (* collect v1 ≤ b1 ⊔ b2 *)
+           doit m1 t1 t2
+         |  _ -> doit m1 l1 t2
+        ) in
+    doit m1 l1 l2
 
-  let cap_list2 l1 l2 = failwith "todo"
-
+  (**
+   * process both binary bounds lists to collect the common minimum of both bounds
+   * preconditions: 
+   * - l1 and l2 ordered wrt. pair order
+  *)
+  let cap_list2 l1 l2 = (* todo *)
+    let m2 = SparseOctagon.BinaryMap.empty in
+    let infl = SparseOctagon.UnaryMap.empty in
+    let rec doit (m2, infl) l1 l2 = match l1, l2 with
+      | [], _ | _, [] -> m2, infl
+      | (p1, b1)::t1, (p2, b2)::t2 -> 
+        (match SparseOctagon.PairLV.compare p1 p2 with (* remove the smaller bounds wrt. pair order until we reach same pairs *)
+         | -1 -> doit (m2,infl) t1 l2
+         |  0 -> let m2 = SparseOctagon.BinaryMap.add p1 (max b1 b2) m2 in (* collect p1 ≤ b1 ⊔ b2 *)
+           let (v1, v2) = p1 in
+           let infl = SparseOctagon.add_elem v1 v2 infl in (* make sure to record infl sets *)
+           let infl = SparseOctagon.add_elem v2 v1 infl in
+           doit (m2, infl) t1 t2
+         |  _ -> doit (m2, infl) l1 t2
+        ) in
+    doit (m2, infl) l1 l2
 
   let cap (o1: SparseOctagon.t) (o2: SparseOctagon.t) = (* implementation basically wie cup_for_full_clousure *)
     let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
@@ -796,14 +831,25 @@ struct
   (* fixpoint iteration handling *)
   (* *************************** *)
 
-  let meet octa octb = 
+  let meet_old octa octb = 
     let oct =
       match octa.d, SparseOctagon.list_of octb.d with
       | None, _ | _, None -> None
-      | Some oct, Some l2 -> try Some (cap_list oct l2) (* cap_list ruft propagate2 auf btw, eigentlich wollen wir das doch vermeiden... *)
+      | Some oct, Some l2 -> try Some (cap_list_old oct l2) (* cap_list ruft propagate2 auf btw, eigentlich wollen wir das doch vermeiden... *)
         with Bot -> None
     in
     { d = oct; env = octb.env }
+
+  let meet = (* same as join but calls cap instead of cup *)
+    match a.d,b.d with
+    | None, _ -> b
+    | _, None -> a
+    | Some octa, Some octb when (Environment.cmp a.env b.env <> 0)->
+      let sup_env = Environment.lce a.env b.env in
+      let mod_a = SparseOctagon.dim_add (Environment.dimchange a.env sup_env) octa in
+      let mod_b = SparseOctagon.dim_add (Environment.dimchange b.env sup_env) octb in
+      {d=cap mod_a mod_b; env = sup_env}
+    | Some octa, Some octb -> { d = cap octa octb ; env = a.env} (* same environment, so we can just meet the octagons*) 
 
   let join a b = 
     match a.d,b.d with
