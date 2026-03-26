@@ -1200,30 +1200,36 @@ struct
        | None -> d (* we cannot add the constraint, so we do not change anything *)
        | Some (terms, constant) -> match terms with
          | [ (c1, x) ] when Z.equal c1 Z.one || Z.equal c1 Z.minus_one -> 
-          let env = Environment.add_vars d.env [x] in
-          let x = Environment.dim_of_var d.env x in
+          let env = tcons1.env in 
+          let c = Z.to_int constant in
+          let lit = if Z.equal c1 Z.one then (Neg x) else (Pos x) in
+          let nlit = if Z.equal c1 Z.one then (Pos x) else (Neg x) in
           let unary = 
             (match tcons1.tcons0.typ with
-              | Apron.Tcons0.SUPEQ (* expr >= 0 *) -> SparseOctagon.UnaryMap.add (if Z.equal c1 Z.one then (Pos x) else (Neg x)) (-(Z.to_int constant)) SparseOctagon.UnaryMap.empty (* todo. das ist glaub ich falsch *)
-              | Apron.Tcons0.DISEQ (* expr != 0 *) -> failwith "todo"
-              | Apron.Tcons0.EQ (* expr = 0 *) -> failwith "todo"
-              | Apron.Tcons0.SUP (* expr > 0 *) -> failwith "todo"
+              | Apron.Tcons0.SUPEQ (* expr >= 0 *) -> SparseOctagon.UnaryMap.add lit c SparseOctagon.UnaryMap.empty 
+              | Apron.Tcons0.SUP (* expr > 0 *) -> SparseOctagon.UnaryMap.add lit (c - 1) SparseOctagon.UnaryMap.empty
+              | Apron.Tcons0.EQ (* expr = 0 *) -> SparseOctagon.UnaryMap.add lit c (SparseOctagon.UnaryMap.add nlit (-c) SparseOctagon.UnaryMap.empty) 
+              | Apron.Tcons0.DISEQ (* expr != 0 *) -> SparseOctagon.UnaryMap.add lit (c - 1) (SparseOctagon.UnaryMap.add nlit ((-c) - 1) SparseOctagon.UnaryMap.empty)
               | Apron.Tcons0.EQMOD (_) (* expr = 0 (mod m) *) -> SparseOctagon.UnaryMap.empty (* we cannot add the constraint, so we do not change anything *)
             ) in 
           let oct = {SparseOctagon.unary; binary = SparseOctagon.BinaryMap.empty; infl = SparseOctagon.UnaryMap.empty} in
           let t' = {env = env; d = Some oct} in
           meet d t' 
-
          | [ (c1, x); (c2, y) ] when Z.equal c1 Z.one || Z.equal c1 Z.minus_one && Z.equal c2 Z.one || Z.equal c2 Z.minus_one -> 
-          let env = Environment.add_vars d.env [x] in
-          let x = Environment.dim_of_var d.env x in
-          let y = Environment.dim_of_var d.env y in
+          let env = tcons1.env in
+          let c = Z.to_int constant in 
+          let lit1 = if Z.equal c1 Z.one then Neg x else Pos x in
+          let lit2 = if Z.equal c2 Z.one then Neg y else Pos y in
+          let nlit1 = if Z.equal c1 Z.one then Pos x else Neg x in
+          let nlit2 = if Z.equal c2 Z.one then Pos y else Neg y in
+          let p = SparseOctagon.normal (lit1, lit2) in
+          let np = SparseOctagon.normal (nlit1, nlit2) in
           let binary = 
             (match tcons1.tcons0.typ with
-              | Apron.Tcons0.SUPEQ (* expr >= 0 *)-> failwith "todo"
-              | Apron.Tcons0.DISEQ (* expr != 0 *) -> failwith "todo"
-              | Apron.Tcons0.EQ (* expr = 0 *) -> failwith "todo"
-              | Apron.Tcons0.SUP (* expr > 0 *) -> failwith "todo"
+              | Apron.Tcons0.SUPEQ (* expr >= 0 *) -> SparseOctagon.BinaryMap.add p c SparseOctagon.BinaryMap.empty
+              | Apron.Tcons0.SUP (* expr > 0 *) -> SparseOctagon.BinaryMap.add p (c - 1) SparseOctagon.BinaryMap.empty
+              | Apron.Tcons0.EQ (* expr = 0 *) -> SparseOctagon.BinaryMap.add p c (SparseOctagon.BinaryMap.add np (-c) SparseOctagon.BinaryMap.empty)
+              | Apron.Tcons0.DISEQ (* expr != 0 *) -> SparseOctagon.BinaryMap.add p (c - 1) (SparseOctagon.BinaryMap.add np ((-c) - 1) SparseOctagon.BinaryMap.empty)
               | Apron.Tcons0.EQMOD (_) (* expr = 0 (mod m) *) -> SparseOctagon.BinaryMap.empty (* we cannot add the constraint, so we do not change anything *)
             ) in
           let oct = {SparseOctagon.unary =SparseOctagon.UnaryMap.empty; binary = binary; infl = SparseOctagon.UnaryMap.empty} in
