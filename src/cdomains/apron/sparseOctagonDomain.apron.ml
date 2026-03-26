@@ -1026,6 +1026,26 @@ struct
           | [(coeff, var)] when Z.equal coeff Z.one || Z.equal coeff Z.minus_one -> Some (Some (coeff, var), constant)
           |_ -> None))
 
+  (** simplify a texpr0 to:
+    - [] + c
+    - [±x] + c
+    - [±x; ±y] + c
+    returns None for all other shapes
+  *)
+  let simplify_texpr0 (t: t) (texpr0: Apron.Texpr0.t) =
+    let is_pm_one c = Z.equal c Z.one || Z.equal c Z.minus_one in
+    let expr0 = Apron.Texpr0.to_expr texpr0 in
+    let texpr1 = Apron.Texpr1.of_expr t.env expr0 in (* TODO *)
+    let expr1 = Apron.Texpr1.to_expr texpr1 in
+    BatOption.bind (simplified_monomials_from_texp t expr1) (fun (terms, constant) ->
+      let terms = List.sort (fun (_, i1) (_, i2) -> Int.compare i1 i2) terms in
+      match terms with
+      | [] -> Some (terms, constant)
+      | [ (c1, x) ] when is_pm_one c1 -> Some ([ (c1, x) ], constant)
+      | [ (c1, x); (c2, y) ] when x <> y && is_pm_one c1 && is_pm_one c2 -> Some ([ (c1, x); (c2, y) ], constant)
+      | _ -> None
+    )
+
   (** assign case:  var := c   (c is a number, possibly negative)  *)
   let assign_const var c (t : VarManagement.t) : VarManagement.t =
     match t.d with
@@ -1172,7 +1192,47 @@ struct
   (* Module AssertionRels demands: *)
   (* ***************************** *)
 
-  let assert_constraint ask d e negate (no_ov: bool Lazy.t) = failwith "SparseOctagonDomain.assert_constraint: not implemented"
+
+  let assert_constraint ask d e negate (no_ov: bool Lazy.t) = 
+    match Convert.tcons1_of_cil_exp ask d d.env e negate no_ov with (* negate wird bei der umwandlung bereits berücksichtigt, das brauchen wir danach nicht mehr *)
+    | tcons1 -> 
+      (match simplify_texpr0 d (tcons1.tcons0.texpr0) with
+       | None -> d (* we cannot add the constraint, so we do not change anything *)
+       | Some (terms, constant) -> match terms with
+         | [ (c1, x) ] when Z.equal c1 Z.one || Z.equal c1 Z.minus_one -> 
+          let env = Environment.add_vars d.env [x] in
+          let x = Environment.dim_of_var d.env x in
+          let unary = 
+            (match tcons1.tcons0.typ with
+              | Apron.Tcons0.SUPEQ (* expr >= 0 *) -> SparseOctagon.UnaryMap.add (if Z.equal c1 Z.one then (Pos x) else (Neg x)) (-(Z.to_int constant)) SparseOctagon.UnaryMap.empty (* todo. das ist glaub ich falsch *)
+              | Apron.Tcons0.DISEQ (* expr != 0 *) -> failwith "todo"
+              | Apron.Tcons0.EQ (* expr = 0 *) -> failwith "todo"
+              | Apron.Tcons0.SUP (* expr > 0 *) -> failwith "todo"
+              | Apron.Tcons0.EQMOD (_) (* expr = 0 (mod m) *) -> SparseOctagon.UnaryMap.empty (* we cannot add the constraint, so we do not change anything *)
+            ) in 
+          let oct = {SparseOctagon.unary; binary = SparseOctagon.BinaryMap.empty; infl = SparseOctagon.UnaryMap.empty} in
+          let t' = {env = env; d = Some oct} in
+          meet d t' 
+
+         | [ (c1, x); (c2, y) ] when Z.equal c1 Z.one || Z.equal c1 Z.minus_one && Z.equal c2 Z.one || Z.equal c2 Z.minus_one -> 
+          let env = Environment.add_vars d.env [x] in
+          let x = Environment.dim_of_var d.env x in
+          let y = Environment.dim_of_var d.env y in
+          let binary = 
+            (match tcons1.tcons0.typ with
+              | Apron.Tcons0.SUPEQ (* expr >= 0 *)-> failwith "todo"
+              | Apron.Tcons0.DISEQ (* expr != 0 *) -> failwith "todo"
+              | Apron.Tcons0.EQ (* expr = 0 *) -> failwith "todo"
+              | Apron.Tcons0.SUP (* expr > 0 *) -> failwith "todo"
+              | Apron.Tcons0.EQMOD (_) (* expr = 0 (mod m) *) -> SparseOctagon.BinaryMap.empty (* we cannot add the constraint, so we do not change anything *)
+            ) in
+          let oct = {SparseOctagon.unary =SparseOctagon.UnaryMap.empty; binary = binary; infl = SparseOctagon.UnaryMap.empty} in
+          let t' = {env = env; d = Some oct} in
+          meet d t' 
+         | _ -> d (* all other cases: we cannot add the constraint, so we do not change anything *)
+      )
+    | exception Convert.Unsupported_CilExp _ -> d
+
   let env t = t.env
   let eval_interval ask = Bounds.bound_texpr
   let invariant t = failwith "SparseOctagonDomain.invariant: not implemented"
