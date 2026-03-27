@@ -714,7 +714,14 @@ struct
     let l1 = SparseOctagon.BinaryMap.bindings binary1 in
     let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
     let binary, infl = cap_list2 l1 l2 in     (* binary1 ⊓ binary2 *)
-    Some ({unary; binary; infl} : SparseOctagon.t)
+    let set = SparseOctagon.BinaryMap.fold (
+      fun (lit1, lit2) _ acc_set ->
+        let acc_set = SparseOctagon.VarSet.add (SparseOctagon.var_of_lit lit1) acc_set in
+        SparseOctagon.VarSet.add (SparseOctagon.var_of_lit lit2) acc_set
+    ) binary SparseOctagon.VarSet.empty in
+    let unary,binary,infl = SparseOctagon.propagate2 (set, unary, binary, infl) in (* propagate binary bounds through the octagon *)
+    let oct = SparseOctagon.optimize unary binary infl in (* optimize the octagon by removing subsumed binary constraints *)
+    Some oct
 
   (**
    * process both binary bounds lists to collect the common maximum of both bounds
