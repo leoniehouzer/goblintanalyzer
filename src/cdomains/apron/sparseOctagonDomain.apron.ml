@@ -819,6 +819,7 @@ struct
     let l1 = SparseOctagon.BinaryMap.bindings new_o1.binary in
     let l2 = SparseOctagon.BinaryMap.bindings new_o2.binary in 
     let final_binary, final_infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
+    let final_infl, final_binary = SparseOctagon.optimize final_unary final_binary final_infl in (* TODO: ich bin mir nicht sicher ob man das braucht *)
     Some {SparseOctagon.unary = final_unary; binary = final_binary; infl = final_infl} 
 
   let cup_for_full_closure2 (o1: SparseOctagon.t) (o2: SparseOctagon.t) = 
@@ -892,7 +893,7 @@ struct
       {d=cup mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cup octa octb ; env = a.env} (* same environment, so we can just join the octagons*) 
 
-  let rec doit l1 l2 u1 u2 = match l1, l2 with (* funktioniert ähnloch wie in cup_unary, aber gibt Nonen zurück wenns nicht passt. *)
+  let rec doit l1 l2 u1 u2 = match l1, l2 with (* funktioniert ähnlich wie in cup_unary, aber gibt Nonen zurück wenns nicht passt. *)
     | [], [] ->  Some (u1, u2)
     | [], (v2, b2) :: t2 -> None
     | (v1, b1) :: t1, [] -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit t1 l2 u1 u2
