@@ -1034,8 +1034,7 @@ struct
   *)
   let simplify_texpr0 (t: t) (texpr0: Apron.Texpr0.t) =
     let is_pm_one c = Z.equal c Z.one || Z.equal c Z.minus_one in
-    let expr0 = Apron.Texpr0.to_expr texpr0 in
-    let texpr1 = Apron.Texpr1.of_expr t.env expr0 in (* TODO *)
+    let texpr1 = Apron.Texpr1.{texpr0 = texpr0; env = t.env} in
     let expr1 = Apron.Texpr1.to_expr texpr1 in
     BatOption.bind (simplified_monomials_from_texp t expr1) (fun (terms, constant) ->
       let terms = List.sort (fun (_, i1) (_, i2) -> Int.compare i1 i2) terms in
