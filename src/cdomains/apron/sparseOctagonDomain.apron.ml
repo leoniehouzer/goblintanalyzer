@@ -495,6 +495,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     in
     { unary = new_unary; binary = new_binary; infl = (rebuild_infl new_binary) } 
 
+  let dim_add ch m = Timing.wrap "dim add" (dim_add ch) m
 
   (* HELPER FUNCTIONS FOR DIM_REMOVE *)
   (* TODO: if dim_remove works, we can put the helper functions into the real functions *)
@@ -565,6 +566,15 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     let (new_unary, new_binary) = dim_remove_rename new_unary new_binary dim_list in
     let (optimized_infl, optimized_binary) = optimize new_unary new_binary (rebuild_infl new_binary) in
     { unary = new_unary; binary = optimized_binary; infl = optimized_infl }
+
+  let dim_remove ch m = Timing.wrap "dim remove" (fun m -> dim_remove ch m) m
+
+  (* let dim_remove ch m = let res = dim_remove ch m in if M.tracing then
+      M.tracel "dim_remove" "dim remove at positions [%s] in { %s } -> { %s }"
+        (Array.fold_right (fun i str -> (string_of_int i) ^ ", " ^ str)  ch.dim "")
+        (show (snd m))
+        (show (snd res));
+    res *)
 
   end
 
@@ -1189,11 +1199,22 @@ struct
     match Convert.texpr1_expr_of_cil_exp ask t t.env exp no_ov with
     | texp -> assign_texpr t var texp
     | exception Convert.Unsupported_CilExp _ -> forget_vars t [var]
+
+  let assign_exp ask t var exp no_ov =
+    let res = assign_exp ask t var exp no_ov in
+    if M.tracing then M.tracel "ops" "assign_exp t:\n %s \n var: %a \n exp: %a\n no_ov: %b -> \n %s"
+        (show t) Var.pretty var d_exp exp (Lazy.force no_ov) (show res);
+    res
   
   (* diese funktionen konnte ich 1 zu 1 aus linearTwoVarEqualityDomain.apron.ml übernehmen *)
   let assign_var (t: VarManagement.t) v v' =
     let t = add_vars t [v; v'] in
     assign_texpr t v (Var v')
+
+  let assign_var t v v' =
+    let res = assign_var t v v' in
+    if M.tracing then M.tracel "ops" "assign_var t:\n %s \n v: %a \n v': %a\n -> %s" (show t) Var.pretty v Var.pretty v' (show res);
+    res
 
   let assign_var_parallel t vv's =
     let assigned_vars = List.map fst vv's in
@@ -1206,6 +1227,13 @@ struct
       let switched_arr = List.fold_left2 (fun multi_t assigned_var primed_var-> assign_var multi_t assigned_var primed_var) multi_t assigned_vars primed_vars in
       remove_vars switched_arr primed_vars
     | _ -> t
+
+  let assign_var_parallel t vv's =
+    let res = assign_var_parallel t vv's in
+    if M.tracing then M.tracel "ops" "assign_var parallel: %s -> %s" (show t) (show res);
+    res
+
+  let assign_var_parallel t vv's = Timing.wrap "var_parallel" (assign_var_parallel t) vv's
     
   let assign_var_parallel_with t vv's =
     (* TOD0: If we are angling for more performance, this might be a good place ot try. `assign_var_parallel_with` is used whenever a function is entered (body),
@@ -1214,14 +1242,30 @@ struct
     t.d <- t'.d;
     t.env <- t'.env
 
+  let assign_var_parallel_with t vv's =
+    if M.tracing then M.tracel "var_parallel" "assign_var parallel'";
+    assign_var_parallel_with t vv's
+
   let assign_var_parallel' t vs1 vs2 =
     let vv's = List.combine vs1 vs2 in
     assign_var_parallel t vv's
+
+  let assign_var_parallel' t vv's =
+    let res = assign_var_parallel' t vv's in
+    if M.tracing then M.tracel "ops" "assign_var parallel'";
+    res
 
   let substitute_exp ask t var exp no_ov =
     let t = if not @@ Environment.mem_var t.env var then add_vars t [var] else t in
     let res = assign_exp ask t var exp no_ov in
     forget_vars res [var] (* forget_vars statt forget_var wegen dem type *) 
+
+  let substitute_exp ask t var exp no_ov =
+    let res = substitute_exp ask t var exp no_ov in
+    if M.tracing then M.tracel "ops" "Substitute_expr t: \n %s \n var: %a \n exp: %a \n -> \n %s" (show t) Var.pretty var d_exp exp (show res);
+    res
+
+  let substitute_exp ask t var exp no_ov = Timing.wrap "substitution" (substitute_exp ask t var exp) no_ov
     
   let cil_exp_of_lincons1 = Convert.cil_exp_of_lincons1
 
@@ -1279,6 +1323,8 @@ struct
          | _ -> d (* all other cases: we cannot add the constraint, so we do not change anything *)
       )
     | exception Convert.Unsupported_CilExp _ -> d
+
+  let assert_constraint ask d e negate no_ov = Timing.wrap "assert_constraint" (assert_constraint ask d e negate) no_ov
 
   let env t = t.env
   let eval_interval ask = Bounds.bound_texpr
