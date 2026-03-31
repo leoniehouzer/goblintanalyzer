@@ -1,4 +1,4 @@
-// SKIP PARAM: --set ana.activated[+] sparseOctagon --enable ana.int.interval
+// SKIP PARAM: --set ana.activated[+] sparseOctagons --enable ana.int.interval --set 'pre.cppflags[+]' '-std=c99'
 #include <goblint.h>
 
 extern int __VERIFIER_nondet_int();

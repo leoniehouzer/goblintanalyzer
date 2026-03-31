@@ -1,4 +1,4 @@
-// SKIP PARAM: --set ana.activated[+] sparseOctagon --enable ana.int.interval
+// SKIP PARAM: --set ana.activated[+] sparseOctagons --enable ana.int.interval --set 'pre.cppflags[+]' '-std=c99'
 // Example from https://www-apr.lip6.fr/~mine/publi/article-mine-HOSC06.pdf
 #include <goblint.h>
 

@@ -594,7 +594,7 @@ end
 module ExpressionBounds: (SharedFunctions.ConvBounds with type t = VarManagement.t) =
 struct
   include VarManagement
-  let bound_texpr t texpr = failwith "SparseOctagonDomain.bound_texpr: not implemented"
+  let bound_texpr t texpr = None, None (* failwith "SparseOctagonDomain.bound_texpr: not implemented" *)
 end
 
 module D =
