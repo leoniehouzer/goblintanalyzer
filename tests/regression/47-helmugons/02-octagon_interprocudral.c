@@ -1,7 +1,9 @@
-// SKIP PARAM: --set ana.activated[+] sparseOctagons --enable ana.int.interval --set 'pre.cppflags[+]' '-std=c99'
+// SKIP PARAM: --set ana.activated[+] sparseOctagons --enable ana.int.interval --set 'pre.cppflags[+]' '-std=c99' --trace join --trace leq --trace ops
 #include <goblint.h>
 
-extern int __VERIFIER_nondet_int();
+int __VERIFIER_nondet_int(void) {
+    return rand();
+}
 
 int main(void) {
     f1();

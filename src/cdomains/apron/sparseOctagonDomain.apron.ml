@@ -705,24 +705,26 @@ struct
 
   (** TODO: description *)
   let cap (o1: SparseOctagon.t) (o2: SparseOctagon.t) = (* implementation basically wie cup_for_full_clousure *)
-    let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
-    let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
-    (* UnaryMap.bindings is a literal-ordered list *)
-    let l1 = SparseOctagon.UnaryMap.bindings unary1 in
-    let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
-    let unary = cap_list l1 l2 in             (*  unary1 ⊓ unary2  *)
-    (* BinaryMap.bindings is a pair-ordered list *)
-    let l1 = SparseOctagon.BinaryMap.bindings binary1 in
-    let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
-    let binary, infl = cap_list2 l1 l2 in     (* binary1 ⊓ binary2 *)
-    let set = SparseOctagon.BinaryMap.fold (
-      fun (lit1, lit2) _ acc_set ->
-        let acc_set = SparseOctagon.VarSet.add (SparseOctagon.var_of_lit lit1) acc_set in
-        SparseOctagon.VarSet.add (SparseOctagon.var_of_lit lit2) acc_set
-    ) binary SparseOctagon.VarSet.empty in
-    let unary,binary,infl = SparseOctagon.propagate2 (set, unary, binary, infl) in (* propagate binary bounds through the octagon *)
-    let infl, binary = SparseOctagon.optimize unary binary infl in (* optimize the octagon by removing subsumed binary constraints *)
-    Some ({unary; binary; infl} : SparseOctagon.t)
+    try
+      let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
+      let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
+      (* UnaryMap.bindings is a literal-ordered list *)
+      let l1 = SparseOctagon.UnaryMap.bindings unary1 in
+      let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
+      let unary = cap_list l1 l2 in             (*  unary1 ⊓ unary2  *)
+      (* BinaryMap.bindings is a pair-ordered list *)
+      let l1 = SparseOctagon.BinaryMap.bindings binary1 in
+      let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
+      let binary, infl = cap_list2 l1 l2 in     (* binary1 ⊓ binary2 *)
+      let set = SparseOctagon.BinaryMap.fold (
+        fun (lit1, lit2) _ acc_set ->
+          let acc_set = SparseOctagon.VarSet.add (SparseOctagon.var_of_lit lit1) acc_set in
+          SparseOctagon.VarSet.add (SparseOctagon.var_of_lit lit2) acc_set
+      ) binary SparseOctagon.VarSet.empty in
+      let unary,binary,infl = SparseOctagon.propagate2 (set, unary, binary, infl) in (* propagate binary bounds through the octagon *)
+      let infl, binary = SparseOctagon.optimize unary binary infl in (* optimize the octagon by removing subsumed binary constraints *)
+      Some ({unary; binary; infl} : SparseOctagon.t)
+    with Bot -> None
 
   (**
    * process both binary bounds lists to collect the common maximum of both bounds
@@ -894,6 +896,13 @@ struct
       {d=cup mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cup octa octb ; env = a.env} (* same environment, so we can just join the octagons*) 
 
+  let join a b = Timing.wrap "join" (join a) b
+
+  let join a b =
+    let res = join a b in
+    if M.tracing then M.tracel "join" "join a: %s b: %s -> %s" (show a) (show b) (show res) ;
+    res
+
   (** TODO: description *)
   let rec doit l1 l2 u1 u2 = match l1, l2 with (* funktioniert ähnlich wie in cup_unary, aber gibt Nonen zurück wenns nicht passt. *)
     | [], [] ->  Some (u1, u2)
@@ -936,6 +945,13 @@ struct
         else let b1 = SparseOctagon.BinaryMap.find v new_o1.binary in
         (max b1 b2) = b1
       ) new_o2.binary true
+  
+  let leq a b = Timing.wrap "leq" (leq a) b
+
+  let leq t1 t2 =
+    let res = leq t1 t2 in
+    if M.tracing then M.tracel "leq" "leq a: %s b: %s -> %b" (show t1) (show t2) res ;
+    res
 
   (* let leq_for_full_closure a b =
     let env_comp = Environment.cmp a.env b.env in
@@ -963,9 +979,9 @@ struct
         (max b1 b2) = b1
       ) binary2 true *)
  
-  let widen a b = failwith "SparseOctagonDomain.widen: not implemented"
-  let narrow a b = failwith "SparseOctagonDomain.narrow: not implemented"
-  let unify a b = failwith "SparseOctagonDomain.unify: not implemented"
+  let widen a b =  join a b (* failwith "SparseOctagonDomain.widen: not implemented" *)
+  let narrow a b = meet a b (* failwith "SparseOctagonDomain.narrow: not implemented" *)
+  let unify a b = meet a b (* failwith "SparseOctagonDomain.unify: not implemented" *)
 
   (* ****************** *)
   (* transfer functions *)
@@ -978,7 +994,14 @@ struct
     if is_bot_env t || is_top t then t
     else let newoct = List.fold (fun oct i-> forget_var i t) (t.d) vars in
       { d = newoct; env = t.env }
-      
+  
+  let forget_vars t vars =
+    let res = forget_vars t vars in
+    if M.tracing then M.tracel "ops" "forget_vars %s -> %s" (show t) (show res);
+    res
+
+  let forget_vars t vars = Timing.wrap "forget_vars" (forget_vars t) vars
+
   (* aus LTVE, aber überarbeitet. *)
   (** Parses a Texpr to obtain a (coefficient, variable) pair list to repr. a sum of a variables that have a coefficient. If variable is None, the coefficient represents a constant offset. *)
   let monomials_from_texp (t: t) texp =
