@@ -386,6 +386,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
 
   (** removes all constraints with +x or -x in binary, but adds the one that hold implicitly; returns the new unary and binary *)
   let forget_var_binary x unary binary infl = 
+    let infl = rebuild_infl binary in (* rebuild the influence graph, because before there werde mistakes. TODO: find the mistakes *)
     match UnaryMap.find_opt (Pos x) infl, UnaryMap.find_opt (Neg x) infl with
     | None,_ | _,None -> (unary, BinaryMap.filter (fun (v1, v2) _ -> v1 <> Pos x && v1 <> Neg x && v2 <> Pos x && v2 <> Neg x) binary, infl) (* remove all constraints with +x or -x*)
     | Some pl, Some nl -> (* pl = set of literals, that are connected with Pos x, nl = for Neg x *)
@@ -398,7 +399,8 @@ module Oct (Carrier : Carrier) = struct (* functor *)
         match BinaryMap.find_opt p1 binary, BinaryMap.find_opt p2 binary with (* lookup the bounds b1, b2 for these pairs *)
         | None, _  | _, None -> failwith "cant happen, bc there should be a binary constraint, since it is in the influence graph"
         | Some b1, Some b2 -> 
-          let binary = BinaryMap.remove p1 (BinaryMap.remove p2 binary) in (* remove the constraints with x and -x *) (* TODO: evtl. auch aus infl entfernen *)
+          let binary = BinaryMap.remove p1 (BinaryMap.remove p2 binary) in (* remove the constraints with x and -x *) 
+          let infl = rem_elem v1 v2 (rem_elem v2 v1 infl) in 
           let b = b1 + b2 in (* calculate the bound b for v1+v2 ≤ b*)
           if v1 = negate v2 then (* Case: we connected +x-y ≤ b1 and -x+y ≤ b2 ⇒ -y+y ≤ b ⇒ 0 ≤ b ⇒ if b is negative then error, else do nothing *)
             if b < 0 then raise Bot 
@@ -419,7 +421,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
                 (unary, binary, infl)
               )
       ) (unary,binary, infl) pl nl
-              
+  
   (** Remove all bounds that relate to a variable x from oct i.e. [[x := ?]] *)
   let forget_var x oct = (* change the order of arguments, so that it is forget_var oct x. *)
     match oct with
@@ -430,6 +432,11 @@ module Oct (Carrier : Carrier) = struct (* functor *)
       let new_infl = (rebuild_infl new_binary) in 
       let new_infl,new_binary = optimize new_unary new_binary new_infl in
       Some {unary = new_unary ; binary = new_binary; infl = new_infl}) 
+
+  let forget_var x oct = 
+    let res = forget_var x oct in
+    M.tracel "forget_var" "" ;
+    res
 
   let list_of = function 
     | None -> None
@@ -495,7 +502,20 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     in
     { unary = new_unary; binary = new_binary; infl = (rebuild_infl new_binary) } 
 
-  let dim_add ch m = Timing.wrap "dim add" (dim_add ch) m
+  let dim_add ch m = 
+    let res = dim_add ch m in 
+    if M.tracing then
+      let ch_str =
+        ch.dim
+        |> Array.to_list
+        |> List.map string_of_int
+        |> String.concat ", "
+      in
+      M.tracel "dim_add" "dim_add:\n ch: [%s]\n old t:\n%s\n new t:\n%s"
+        ch_str
+        (string_of (Some m))
+        (string_of (Some res));
+    res else res
 
   (* HELPER FUNCTIONS FOR DIM_REMOVE *)
   (* TODO: if dim_remove works, we can put the helper functions into the real functions *)
@@ -567,14 +587,20 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     let (optimized_infl, optimized_binary) = optimize new_unary new_binary (rebuild_infl new_binary) in
     { unary = new_unary; binary = optimized_binary; infl = optimized_infl }
 
-  let dim_remove ch m = Timing.wrap "dim remove" (fun m -> dim_remove ch m) m
-
-  (* let dim_remove ch m = let res = dim_remove ch m in if M.tracing then
-      M.tracel "dim_remove" "dim remove at positions [%s] in { %s } -> { %s }"
-        (Array.fold_right (fun i str -> (string_of_int i) ^ ", " ^ str)  ch.dim "")
-        (show (snd m))
-        (show (snd res));
-    res *)
+  let dim_remove ch m = 
+    let res = dim_remove ch m in 
+    if M.tracing then
+      let ch_str =
+        ch.dim
+        |> Array.to_list
+        |> List.map string_of_int
+        |> String.concat ", "
+      in
+      M.tracel "dim_remove" "dim_remove:\n ch: [%s]\n old t:\n%s\n new t:\n%s"
+        ch_str
+        (string_of (Some m))
+        (string_of (Some res));
+    res else res
 
   end
 
@@ -599,12 +625,97 @@ struct
   module SparseOctagon = Oct(IntBased)
   include SharedFunctions.VarManagementOps (SparseOctagon)
 
+    (* aus LTVE, aber überarbeitet. *)
+  (** Parses a Texpr to obtain a (coefficient, variable) pair list to repr. a sum of a variables that have a coefficient. If variable is None, the coefficient represents a constant offset. *)
+  let monomials_from_texp (t: t) texp =
+    let open Apron.Texpr1 in
+    let exception NotLinearExpr in 
+    let exception ScalarIsInfinity in 
+    let negate coeff_var_list =
+      List.map (fun (monom, offs) -> Z.(BatOption.map (fun (coeff, i) -> (neg coeff, i)) monom, neg offs)) coeff_var_list
+    in
+    let rec convert_texpr texp =
+      begin match texp with
+        | Cst (Interval _) -> failwith "constant was an interval; this is not supported"
+        | Cst (Scalar x) -> 
+          begin match SharedFunctions.int_of_scalar ?round:None x with
+            | Some x -> [(None, x)]
+            | None -> raise ScalarIsInfinity end (* bedeutet, dass es keine exakte ganze zahl ist *)
+        | Var x -> 
+          let var_dim = Environment.dim_of_var t.env x in
+          [(Some (Z.one, var_dim), Z.zero)] (* diesen fall habe ich vereinfacht *)
+        | Unop  (Neg,  e, _, _) -> negate (convert_texpr e)
+        | Unop  (Cast, e, _, _) -> convert_texpr e (* Ignore since casts in apron are used for floating point nums and rounding in contrast to CIL casts *)
+        | Binop (Add, e1, e2, _, _) -> convert_texpr e1 @ convert_texpr e2
+        | Binop (Sub, e1, e2, _, _) -> convert_texpr e1 @ negate (convert_texpr e2)
+        | _  -> raise NotLinearExpr end
+    in match convert_texpr texp with
+    | exception NotLinearExpr -> None
+    | exception ScalarIsInfinity -> None
+    | x -> Some(x)
+
+  (* aus LTVE, aber überarbeitet. *)
+  (** convert and simplify a texpr into a list of monomials (coeff,varidx) and a constant offset *)
+  let simplified_monomials_from_texp (t: t) texp =
+    BatOption.bind (monomials_from_texp t texp) (* wenn None, dann return None, sonst so weitermachen: *)
+      (fun monomiallist ->
+        let module IMap = Map.Make(Int) in
+        let accumulate_constants (exprcache, aconst) (v, offs) =
+           let constant = Z.add aconst offs in
+           match v with
+           | None -> (exprcache, constant)
+           | Some (coeff, idx) ->
+             let old_coeff = BatOption.default Z.zero (IMap.find_opt idx exprcache) in
+             let new_coeff = Z.add old_coeff coeff in
+             let newcache =
+               if Z.equal new_coeff Z.zero then IMap.remove idx exprcache
+               else IMap.add idx new_coeff exprcache
+             in (newcache, constant)
+        in 
+        let (expr, constant) = List.fold_left accumulate_constants (IMap.empty, Z.zero) monomiallist in
+        Some (IMap.fold (fun v c acc -> if Z.equal c Z.zero then acc else (c, v) :: acc) expr [], constant))
+
+  (** TODO: description *)
+  let simplify_to_ref_and_offset (t: t) texp =
+    BatOption.bind (simplified_monomials_from_texp t texp )
+      (fun (sum_of_terms, constant) ->
+         (match sum_of_terms with
+          | [] -> Some (None, constant)
+          | [(coeff, var)] when Z.equal coeff Z.one || Z.equal coeff Z.minus_one -> Some (Some (coeff, var), constant)
+          |_ -> None))
+
+  let simplify_to_ref_and_offset t texp = 
+    let res = simplify_to_ref_and_offset t texp in
+    if M.tracing then
+      let res_str =
+        match res with
+        | None -> "None"
+        | Some (None, offs) -> Printf.sprintf "Some (None, %s)" (Z.to_string offs)
+        | Some (Some (coeff, var), offs) ->
+          Printf.sprintf "Some (Some (%s, %s), %s)"
+            (Z.to_string coeff)
+            (IntBased.string_of var)
+            (Z.to_string offs)
+      in
+      M.tracel "ops" "simplify_to_ref_and_offset:\n texp: %a\n res: %s"
+        Texpr1.Expr.pretty texp res_str;
+    res else res
+
 end
 
 module ExpressionBounds: (SharedFunctions.ConvBounds with type t = VarManagement.t) =
 struct
   include VarManagement
-  let bound_texpr t texpr = None, None (* failwith "SparseOctagonDomain.bound_texpr: not implemented" *)
+
+  let bound_texpr t texpr = (* aus LTVE *)
+    if t.d = None then None, None
+    else
+      match simplify_to_ref_and_offset t (Texpr1.to_expr texpr) with
+      | Some (None, offset) -> 
+        (if M.tracing then M.tracel "bounds" "min: %a max: %a" GobZ.pretty offset GobZ.pretty offset;
+         Some offset, Some offset)
+      | _ -> None, None
+
 end
 
 module D =
@@ -989,9 +1100,9 @@ struct
         (max b1 b2) = b1
       ) binary2 true *)
  
-  let widen a b =  join a b (* failwith "SparseOctagonDomain.widen: not implemented" *)
-  let narrow a b = meet a b (* failwith "SparseOctagonDomain.narrow: not implemented" *)
-  let unify a b = meet a b (* failwith "SparseOctagonDomain.unify: not implemented" *)
+  let widen a b =  failwith "SparseOctagonDomain.widen: not implemented" (*  join a b *)
+  let narrow a b = failwith "SparseOctagonDomain.narrow: not implemented" (* meet a b *)
+  let unify a b = failwith "SparseOctagonDomain.unify: not implemented"  (* meet a b *)
 
   (* ****************** *)
   (* transfer functions *)
@@ -1007,69 +1118,21 @@ struct
   
   let forget_vars t vars =
     let res = forget_vars t vars in
-    if M.tracing then M.tracel "ops" "forget_vars %s -> %s" (show t) (show res);
-    res
+    if M.tracing then 
+      let vars_str =
+        vars
+        |> List.map (fun v ->
+            try
+              let dim = Environment.dim_of_var t.env v in
+              VarManagement.IntBased.string_of dim
+            with _ -> "?"
+          )
+        |> String.concat ", "
+      in
+      M.tracel "ops" "forget_vars: [%s] \n t:\n %s \n -> \n %s" vars_str (show t) (show res);
+    res else res
 
   let forget_vars t vars = Timing.wrap "forget_vars" (forget_vars t) vars
-
-  (* aus LTVE, aber überarbeitet. *)
-  (** Parses a Texpr to obtain a (coefficient, variable) pair list to repr. a sum of a variables that have a coefficient. If variable is None, the coefficient represents a constant offset. *)
-  let monomials_from_texp (t: t) texp =
-    let open Apron.Texpr1 in
-    let exception NotLinearExpr in 
-    let exception ScalarIsInfinity in 
-    let negate coeff_var_list =
-      List.map (fun (monom, offs) -> Z.(BatOption.map (fun (coeff, i) -> (neg coeff, i)) monom, neg offs)) coeff_var_list
-    in
-    let rec convert_texpr texp =
-      begin match texp with
-        | Cst (Interval _) -> failwith "constant was an interval; this is not supported"
-        | Cst (Scalar x) -> 
-          begin match SharedFunctions.int_of_scalar ?round:None x with
-            | Some x -> [(None, x)]
-            | None -> raise ScalarIsInfinity end (* bedeutet, dass es keine exakte ganze zahl ist *)
-        | Var x -> 
-          let var_dim = Environment.dim_of_var t.env x in
-          [(Some (Z.one, var_dim), Z.zero)] (* diesen fall habe ich vereinfacht *)
-        | Unop  (Neg,  e, _, _) -> negate (convert_texpr e)
-        | Unop  (Cast, e, _, _) -> convert_texpr e (* Ignore since casts in apron are used for floating point nums and rounding in contrast to CIL casts *)
-        | Binop (Add, e1, e2, _, _) -> convert_texpr e1 @ convert_texpr e2
-        | Binop (Sub, e1, e2, _, _) -> convert_texpr e1 @ negate (convert_texpr e2)
-        | _  -> raise NotLinearExpr end
-    in match convert_texpr texp with
-    | exception NotLinearExpr -> None
-    | exception ScalarIsInfinity -> None
-    | x -> Some(x)
-
-  (* aus LTVE, aber überarbeitet. *)
-  (** convert and simplify a texpr into a list of monomials (coeff,varidx) and a constant offset *)
-  let simplified_monomials_from_texp (t: t) texp =
-    BatOption.bind (monomials_from_texp t texp) (* wenn None, dann return None, sonst so weitermachen: *)
-      (fun monomiallist ->
-        let module IMap = Map.Make(Int) in
-        let accumulate_constants (exprcache, aconst) (v, offs) =
-           let constant = Z.add aconst offs in
-           match v with
-           | None -> (exprcache, constant)
-           | Some (coeff, idx) ->
-             let old_coeff = BatOption.default Z.zero (IMap.find_opt idx exprcache) in
-             let new_coeff = Z.add old_coeff coeff in
-             let newcache =
-               if Z.equal new_coeff Z.zero then IMap.remove idx exprcache
-               else IMap.add idx new_coeff exprcache
-             in (newcache, constant)
-        in 
-        let (expr, constant) = List.fold_left accumulate_constants (IMap.empty, Z.zero) monomiallist in
-        Some (IMap.fold (fun v c acc -> if Z.equal c Z.zero then acc else (c, v) :: acc) expr [], constant))
-
-  (** TODO: description *)
-  let simplify_to_ref_and_offset (t: t) texp =
-    BatOption.bind (simplified_monomials_from_texp t texp )
-      (fun (sum_of_terms, constant) ->
-         (match sum_of_terms with
-          | [] -> Some (None, constant)
-          | [(coeff, var)] when Z.equal coeff Z.one || Z.equal coeff Z.minus_one -> Some (Some (coeff, var), constant)
-          |_ -> None))
 
   (** simplify a texpr0 to:
     - [] + c
@@ -1104,6 +1167,19 @@ struct
         let oct2 = {SparseOctagon.unary; binary; infl} in
         {t with d = Some oct2}
       | None -> t (* bot bleibt bot *)
+
+  (* let assign_const var c t =
+    let res = Timing.wrap "assign_const" (fun () -> assign_const var c t) () in
+    if M.tracing then
+      let var_str =
+        try
+          let dim = Environment.dim_of_var t.env var in
+          VarManagement.IntBased.string_of dim
+        with _ -> "?"
+      in
+      M.tracel "ops" "assign_const %s := %a -> %s" var_str GobZ.pretty c (show res);
+    res else res *)
+
   
   (** assign case:  var := +- var + c   (c is a number, possibly negative)
       if minus is true, then var := -var + c, else var := +var + c 
@@ -1202,9 +1278,16 @@ struct
 
   let assign_exp ask t var exp no_ov =
     let res = assign_exp ask t var exp no_ov in
-    if M.tracing then M.tracel "ops" "assign_exp t:\n %s \n var: %a \n exp: %a\n no_ov: %b -> \n %s"
-        (show t) Var.pretty var d_exp exp (Lazy.force no_ov) (show res);
-    res
+    if M.tracing then
+      let var_str =
+        try
+          let dim = Environment.dim_of_var t.env var in
+          VarManagement.IntBased.string_of dim
+        with _ -> "?"
+      in
+      M.tracel "ops" "assign_exp \n t:\n %s \n var: %s \n exp: %a\n no_ov: %b -> \n %s"
+        (show t) var_str d_exp exp (Lazy.force no_ov) (show res);
+    res else res
   
   (* diese funktionen konnte ich 1 zu 1 aus linearTwoVarEqualityDomain.apron.ml übernehmen *)
   let assign_var (t: VarManagement.t) v v' =
@@ -1327,7 +1410,7 @@ struct
   let assert_constraint ask d e negate no_ov = Timing.wrap "assert_constraint" (assert_constraint ask d e negate) no_ov
 
   let env t = t.env
-  let eval_interval ask = Bounds.bound_texpr
+  let eval_interval ask = Bounds.bound_texpr (* Bounds.bound_texpr*)
   let invariant t = failwith "SparseOctagonDomain.invariant: not implemented"
   
   type marshal = t
@@ -1336,6 +1419,7 @@ struct
   let unmarshal t = t
   let relift t = t
 end
+
 
 
 (* Map: fold f m init computes (f kN dN ... (f k1 d1 init)...), where k1 ... kN are keys, and d1 ... dN are associated data *)
