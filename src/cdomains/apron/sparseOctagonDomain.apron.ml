@@ -421,6 +421,12 @@ module Oct (Carrier : Carrier) = struct (* functor *)
                 (unary, binary, infl)
               )
       ) (unary,binary, infl) pl nl
+
+  (* let forget_var_binary x unary binary infl =  *)
+  
+  let forget_var_binary x unary binary infl = 
+    if M.tracing then M.tracel "forget_var_binary" "" ;
+    forget_var_binary x unary binary infl
   
   (** Remove all bounds that relate to a variable x from oct i.e. [[x := ?]] *)
   let forget_var x oct = (* change the order of arguments, so that it is forget_var oct x. *)
@@ -434,9 +440,8 @@ module Oct (Carrier : Carrier) = struct (* functor *)
       Some {unary = new_unary ; binary = new_binary; infl = new_infl}) 
 
   let forget_var x oct = 
-    let res = forget_var x oct in
-    M.tracel "forget_var" "" ;
-    res
+    if M.tracing then M.tracel "forget_var" "" ;
+    forget_var x oct 
 
   let list_of = function 
     | None -> None
@@ -715,6 +720,20 @@ struct
         (if M.tracing then M.tracel "bounds" "min: %a max: %a" GobZ.pretty offset GobZ.pretty offset;
          Some offset, Some offset)
       | _ -> None, None
+    
+  let bound_texpr t texpr = 
+    let res = bound_texpr t texpr in
+    if M.tracing then
+      let res_str =
+        match res with
+        | (None, None) -> "(None, None)"
+        | (Some min, Some max) -> Printf.sprintf "(Some %s, Some %s)" (Z.to_string min) (Z.to_string max)
+        | (Some min, None) -> Printf.sprintf "(Some %s, None)" (Z.to_string min)
+        | (None, Some max) -> Printf.sprintf "(None, Some %s)" (Z.to_string max)
+      in
+      M.tracel "bound_texpr" "bound_texpr:\n texp: %a\n res: %s"
+        Texpr1.pretty texpr res_str;
+    res else res
 
 end
 
@@ -1005,6 +1024,11 @@ struct
       {d=cap mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cap octa octb ; env = a.env} (* same environment, so we can just meet the octagons*) 
 
+  let meet a b = 
+    let res = meet a b in
+    if M.tracing then M.tracel "meet" "meet a: %s b: %s -> %s" (show a) (show b) (show res);
+    res
+
   (** TODO: description *)
   let join a b = 
     match a.d,b.d with
@@ -1016,8 +1040,6 @@ struct
       let mod_b = SparseOctagon.dim_add (Environment.dimchange b.env sup_env) octb in
       {d=cup mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cup octa octb ; env = a.env} (* same environment, so we can just join the octagons*) 
-
-  let join a b = Timing.wrap "join" (join a) b
 
   let join a b =
     let res = join a b in
@@ -1067,8 +1089,6 @@ struct
         (max b1 b2) = b1
       ) new_o2.binary true
   
-  let leq a b = Timing.wrap "leq" (leq a) b
-
   let leq t1 t2 =
     let res = leq t1 t2 in
     if M.tracing then M.tracel "leq" "leq a: %s b: %s -> %b" (show t1) (show t2) res ;
@@ -1100,9 +1120,9 @@ struct
         (max b1 b2) = b1
       ) binary2 true *)
  
-  let widen a b =  failwith "SparseOctagonDomain.widen: not implemented" (*  join a b *)
-  let narrow a b = failwith "SparseOctagonDomain.narrow: not implemented" (* meet a b *)
-  let unify a b = failwith "SparseOctagonDomain.unify: not implemented"  (* meet a b *)
+  let widen a b = join a b (* failwith "SparseOctagonDomain.widen: not implemented" *)
+  let narrow a b = meet a b (* failwith "SparseOctagonDomain.narrow: not implemented" *)
+  let unify a b = meet a b (* failwith "SparseOctagonDomain.unify: not implemented" *)
 
   (* ****************** *)
   (* transfer functions *)
@@ -1118,21 +1138,8 @@ struct
   
   let forget_vars t vars =
     let res = forget_vars t vars in
-    if M.tracing then 
-      let vars_str =
-        vars
-        |> List.map (fun v ->
-            try
-              let dim = Environment.dim_of_var t.env v in
-              VarManagement.IntBased.string_of dim
-            with _ -> "?"
-          )
-        |> String.concat ", "
-      in
-      M.tracel "ops" "forget_vars: [%s] \n t:\n %s \n -> \n %s" vars_str (show t) (show res);
+    if M.tracing then let vars_str = vars|> List.map (fun v -> try let dim = Environment.dim_of_var t.env v in VarManagement.IntBased.string_of dim with _ -> "?") |> String.concat ", " in M.tracel "ops" "forget_vars: [%s] \n t:\n %s \n -> \n %s" vars_str (show t) (show res);
     res else res
-
-  let forget_vars t vars = Timing.wrap "forget_vars" (forget_vars t) vars
 
   (** simplify a texpr0 to:
     - [] + c
@@ -1152,7 +1159,7 @@ struct
       | [ (c1, x); (c2, y) ] when x <> y && is_pm_one c1 && is_pm_one c2 -> Some ([ (c1, x); (c2, y) ], constant)
       | _ -> None
     )
-
+  
   (** assign case:  var := c   (c is a number, possibly negative)  *)
   let assign_const var c (t : VarManagement.t) : VarManagement.t =
     match t.d with
@@ -1168,23 +1175,15 @@ struct
         {t with d = Some oct2}
       | None -> t (* bot bleibt bot *)
 
-  (* let assign_const var c t =
-    let res = Timing.wrap "assign_const" (fun () -> assign_const var c t) () in
-    if M.tracing then
-      let var_str =
-        try
-          let dim = Environment.dim_of_var t.env var in
-          VarManagement.IntBased.string_of dim
-        with _ -> "?"
-      in
-      M.tracel "ops" "assign_const %s := %a -> %s" var_str GobZ.pretty c (show res);
-    res else res *)
+  let assign_const var c t =
+    let res = assign_const var c t in
+    if M.tracing then let var_str = try let dim = Environment.dim_of_var t.env var in VarManagement.IntBased.string_of dim with _ -> "?" in M.tracel "ops" "assign_const %s := %a" var_str GobZ.pretty (Z.of_int c);
+    res else res
 
-  
   (** assign case:  var := +- var + c   (c is a number, possibly negative)
       if minus is true, then var := -var + c, else var := +var + c 
   *)
-  let substitute_expr (var : Var.t) minus c (t : VarManagement.t) : VarManagement.t = (* umbenennen *)
+  let substitute_expr (var : Var.t) minus c (t : VarManagement.t) : VarManagement.t =
     match t.d with
     | None -> t
     | Some oct ->
@@ -1222,6 +1221,18 @@ struct
         in
         {t with d = Some {unary; binary; infl = SparseOctagon.rebuild_infl binary}} (* kein subsumed nötig, da wir das octagon komplett in "x-Richtung" verschieben *)
 
+  let substitute_expr var minus c t =
+    let res = substitute_expr var minus c t in
+    if M.tracing then 
+      let var_str =
+        try
+          let dim = Environment.dim_of_var t.env var in
+          VarManagement.IntBased.string_of dim
+        with _ -> "?"
+      in
+      M.tracel "ops" "substitute_expr %s := %s * %s + %a" var_str (if minus then "-" else "+") var_str GobZ.pretty (Z.of_int c);
+    res else res
+
   (** assign case:  var := +- y + c   (c is a number, possibly negative)
       if minus is true, then var := -y + c, else var := +y + c 
   *)
@@ -1251,6 +1262,23 @@ struct
             let (unary, binary, infl) = SparseOctagon.propagate2_var y oct1.unary binary infl in
             let infl,binary = SparseOctagon.optimize unary binary infl in
             {t with d = Some {SparseOctagon.unary; binary; infl}}
+  
+  let assign_var_and_const var minus y c t =
+    let res = assign_var_and_const var minus y c t in
+    if M.tracing then 
+      let var_str =
+        try
+          let dim = Environment.dim_of_var t.env var in
+          VarManagement.IntBased.string_of dim
+        with _ -> "?"
+      in
+      let y_str =
+        try
+          VarManagement.IntBased.string_of y
+        with _ -> "?"
+      in
+      M.tracel "ops" "assign_var_and_const %s := %s * %s + %a" var_str (if minus then "-" else "+") y_str GobZ.pretty (Z.of_int c);
+    res else res
 
   (* aus LTVE, aber überarbeitet. *)
   (** Assign texpr to var in the octagon domain, for the cases ±x + c  or  c. All other cases lead to forget_var *)
@@ -1345,7 +1373,7 @@ struct
 
   let substitute_exp ask t var exp no_ov =
     let res = substitute_exp ask t var exp no_ov in
-    if M.tracing then M.tracel "ops" "Substitute_expr t: \n %s \n var: %a \n exp: %a \n -> \n %s" (show t) Var.pretty var d_exp exp (show res);
+    if M.tracing then M.tracel "ops" "substitute_exp t: \n %s \n var: %a \n exp: %a \n -> \n %s" (show t) Var.pretty var d_exp exp (show res);
     res
 
   let substitute_exp ask t var exp no_ov = Timing.wrap "substitution" (substitute_exp ask t var exp) no_ov
@@ -1407,10 +1435,13 @@ struct
       )
     | exception Convert.Unsupported_CilExp _ -> d
 
-  let assert_constraint ask d e negate no_ov = Timing.wrap "assert_constraint" (assert_constraint ask d e negate) no_ov
+  let assert_constraint ask d e negate no_ov = 
+    let res = assert_constraint ask d e negate no_ov in
+    if M.tracing then M.tracel "ops" "assert_constraint d: \n %s \n e: %a \n negate: %b \n no_ov: %b -> \n %s" (show d) d_exp e negate (Lazy.force no_ov) (show res);
+    res 
 
   let env t = t.env
-  let eval_interval ask = Bounds.bound_texpr (* Bounds.bound_texpr*)
+  let eval_interval ask = Bounds.bound_texpr
   let invariant t = failwith "SparseOctagonDomain.invariant: not implemented"
   
   type marshal = t

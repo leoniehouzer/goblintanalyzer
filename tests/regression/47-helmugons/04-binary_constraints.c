@@ -6,13 +6,7 @@ int main() {
   int y = 1;
 
   int a = 1 + 2 + 3;
-  assert(a == 6);
-
-  if (x >= 0) {
-    if (y >= 1) {
-        int z = x + y;
-    }
-  }
+  __goblint_check(a == 6); // SUCCESS
 
   x = x + 1; 
   y = x + 1; 
