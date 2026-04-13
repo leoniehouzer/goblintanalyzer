@@ -385,7 +385,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     Only disadvantage: this requires a lot of string manipulation ... *)
 
   (** removes all constraints with +x or -x in binary, but adds the one that hold implicitly; returns the new unary and binary *)
-  let forget_var_binary x unary binary infl = 
+  (* let forget_var_binary x unary binary infl = 
     let infl = rebuild_infl binary in (* rebuild the influence graph, because before there werde mistakes. TODO: find the mistakes *)
     match UnaryMap.find_opt (Pos x) infl, UnaryMap.find_opt (Neg x) infl with
     | None,_ | _,None -> (unary, BinaryMap.filter (fun (v1, v2) _ -> v1 <> Pos x && v1 <> Neg x && v2 <> Pos x && v2 <> Neg x) binary, infl) (* remove all constraints with +x or -x*)
@@ -420,21 +420,20 @@ module Oct (Carrier : Carrier) = struct (* functor *)
                 let infl = add_elem v2 v1 infl in 
                 (unary, binary, infl)
               )
-      ) (unary,binary, infl) pl nl
+      ) (unary,binary, infl) pl nl *)
 
-  (* let forget_var_binary x unary binary infl =  *)
-  
-  let forget_var_binary x unary binary infl = 
+  (* let forget_var_binary x unary binary infl = 
     if M.tracing then M.tracel "forget_var_binary" "" ;
     forget_var_binary x unary binary infl
+   *)
   
   (** Remove all bounds that relate to a variable x from oct i.e. [[x := ?]] *)
   let forget_var x oct = (* change the order of arguments, so that it is forget_var oct x. *)
     match oct with
     | None -> None
-    | Some {unary; binary; infl} -> (
+    | Some {unary; binary; _} -> (
       let new_unary = (UnaryMap.remove (Pos x) (UnaryMap.remove (Neg x) unary)) in
-      let (new_unary, new_binary, infl) = forget_var_binary x new_unary binary infl in
+      let new_binary = BinaryMap.filter (fun (lit1, lit2) _ -> lit1 <> Pos x && lit1 <> Neg x && lit2 <> Pos x && lit2 <> Neg x) binary in
       let new_infl = (rebuild_infl new_binary) in 
       let new_infl,new_binary = optimize new_unary new_binary new_infl in
       Some {unary = new_unary ; binary = new_binary; infl = new_infl}) 
@@ -539,8 +538,26 @@ module Oct (Carrier : Carrier) = struct (* functor *)
         | Neg old_index -> if List.mem (Carrier.to_int old_index) dim_list then new_unary else UnaryMap.add (Neg old_index) bound new_unary
     ) old_unary UnaryMap.empty  
 
+  let new_binary_remove old_binary (dim_list : int list) =
+    BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
+      match (old_lit1, old_lit2) with
+      | (Neg old_index1, Neg old_index2) -> 
+        if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary
+        else BinaryMap.add (Neg old_index1, Neg old_index2) bound new_binary
+      | (Neg old_index1, Pos old_index2) ->
+        if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary
+        else BinaryMap.add (Neg old_index1, Pos old_index2) bound new_binary
+      | (Pos old_index1, Neg old_index2) ->
+        if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary
+        else BinaryMap.add (Pos old_index1, Neg old_index2) bound new_binary
+      | (Pos old_index1, Pos old_index2) ->
+        if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary
+        else BinaryMap.add (Pos old_index1, Pos old_index2) bound new_binary
+    ) BinaryMap.empty old_binary
+ 
+
   (** Remove binary constraints, where both variables are removed *)
-  let binary_remove1 old_binary (dim_list : int list) =
+  (* let binary_remove1 old_binary (dim_list : int list) =
     BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
       match (old_lit1, old_lit2) with
       | (Neg old_index1, Neg old_index2) -> 
@@ -555,9 +572,9 @@ module Oct (Carrier : Carrier) = struct (* functor *)
       | (Pos old_index1, Pos old_index2) ->
         if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
         else BinaryMap.add (Pos old_index1, Pos old_index2) bound new_binary (* constraint behalten *)
-    ) old_binary BinaryMap.empty 
+    ) old_binary BinaryMap.empty  *)
   
-  (** changes the indeces in binary for dim_remove, but doesnt remove any entries. *)
+  (** changes the indeces in unary and binary for dim_remove, but doesnt remove any entries. *)
   let dim_remove_rename unary binary (dim_list : int list) =
     let shift_index_remove (old_index : Carrier.t) (dim_list : int list) : Carrier.t = 
       (let k = List.fold_left (fun acc index -> if index < (Carrier.to_int old_index) then acc + 1 else acc) 0 dim_list
@@ -585,10 +602,8 @@ module Oct (Carrier : Carrier) = struct (* functor *)
   let dim_remove (ch: Apron.Dim.change) o = 
     let dim_list = Array.to_list ch.dim |> List.sort_uniq Int.compare in (* Duplikate entfernen *)
     let unary =  new_unary_remove2 o.unary dim_list in (* TODO: verison 1 oder 2 verwenden? *)
-    let binary = binary_remove1 o.binary dim_list in
-    let infl = rebuild_infl binary in
-    let (new_unary, new_binary, new_infl) = List.fold_left (fun (unary, binary, infl) x -> forget_var_binary (Carrier.to_t x) unary binary infl) (unary, binary, infl) dim_list in 
-    let (new_unary, new_binary) = dim_remove_rename new_unary new_binary dim_list in
+    let binary = new_binary_remove o.binary dim_list in
+    let (new_unary, new_binary) = dim_remove_rename unary binary dim_list in
     let (optimized_infl, optimized_binary) = optimize new_unary new_binary (rebuild_infl new_binary) in
     { unary = new_unary; binary = optimized_binary; infl = optimized_infl }
 
@@ -712,13 +727,37 @@ module ExpressionBounds: (SharedFunctions.ConvBounds with type t = VarManagement
 struct
   include VarManagement
 
-  let bound_texpr t texpr = (* aus LTVE *)
+  let bound_texpr t texpr = 
     if t.d = None then None, None
     else
-      match simplify_to_ref_and_offset t (Texpr1.to_expr texpr) with
-      | Some (None, offset) -> 
+      match simplified_monomials_from_texp t (Texpr1.to_expr texpr) with
+      | Some ([], offset) ->
         (if M.tracing then M.tracel "bounds" "min: %a max: %a" GobZ.pretty offset GobZ.pretty offset;
          Some offset, Some offset)
+      | Some ([(coeff, var)], offset) -> 
+        (let c = (Z.to_int coeff) in
+        let o = (Z.to_int offset) in
+        let max = VarManagement.SparseOctagon.UnaryMap.find_opt (Pos var) (Option.get t.d).unary in 
+        let min = VarManagement.SparseOctagon.UnaryMap.find_opt (Neg var) (Option.get t.d).unary in
+        let max = (match max with Some max -> Some (Z.of_int (c * max + o)) | _ -> None) in
+        let min = (match min with Some min ->  Some (Z.of_int (c * min + o)) | _ -> None) in
+        if c > 0 then (min, max) 
+        else (max, min))
+      | Some ( [(coeff1, var1); (coeff2, var2)], offset) ->
+        let o = (Z.to_int offset) in
+        let v1, neg_v1 = if Z.equal coeff1 Z.one then Pos var1, Neg var1 else Neg var1, Pos var1 in
+        let v2, neg_v2 = if Z.equal coeff2 Z.one then Pos var2, Neg var2 else Neg var2, Pos var2 in
+        let max =
+          (match VarManagement.SparseOctagon.UnaryMap.find_opt v1 (Option.get t.d).unary, VarManagement.SparseOctagon.UnaryMap.find_opt v2 (Option.get t.d).unary with
+          | Some x, Some y -> Some (Z.of_int (Z.to_int coeff1 * x + Z.to_int coeff2 * y + o))
+          | _ -> match VarManagement.SparseOctagon.BinaryMap.find_opt (VarManagement.SparseOctagon.normal (v1, v2)) (Option.get t.d).binary with Some z -> Some (Z.of_int (z + o)) | None -> None
+          ) in
+        let min =
+          (match VarManagement.SparseOctagon.UnaryMap.find_opt neg_v1 (Option.get t.d).unary, VarManagement.SparseOctagon.UnaryMap.find_opt neg_v2 (Option.get t.d).unary with
+          | Some x, Some y -> Some (Z.of_int (- Z.to_int coeff1 * x - Z.to_int coeff2 * y + o))
+          | _ -> match VarManagement.SparseOctagon.BinaryMap.find_opt (VarManagement.SparseOctagon.normal (neg_v1, neg_v2)) (Option.get t.d).binary with Some b -> Some (Z.of_int (- b + o)) | None -> None
+        ) in
+        (min, max)
       | _ -> None, None
     
   let bound_texpr t texpr = 
@@ -987,7 +1026,7 @@ struct
 
   let cup_naive_version o1 o2  = 
     let {unary; binary; infl} : SparseOctagon.t = SparseOctagon.strong_closure o1 in  (* full closure on o1 *)
-    let {unary = unary2; binary = binary2} : SparseOctagon.t = SparseOctagon.strong_closure o2 in  (* full closure on o2 *)
+    let {unary = unary2; binary = binary2; _ } : SparseOctagon.t = SparseOctagon.strong_closure o2 in  (* full closure on o2 *)
     (* BinaryMap.bindings is a pair-ordered list *)
     let l1 = SparseOctagon.BinaryMap.bindings binary in
     let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
@@ -1122,7 +1161,7 @@ struct
  
   let widen a b = join a b (* failwith "SparseOctagonDomain.widen: not implemented" *)
   let narrow a b = meet a b (* failwith "SparseOctagonDomain.narrow: not implemented" *)
-  let unify a b = meet a b (* failwith "SparseOctagonDomain.unify: not implemented" *)
+  let unify a b = meet a b 
 
   (* ****************** *)
   (* transfer functions *)
