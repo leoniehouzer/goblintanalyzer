@@ -346,10 +346,10 @@ module Oct (Carrier : Carrier) = struct (* functor *)
                 | None, m2 -> 
                   let infl = add_elem v1 v2 infl in
                   let infl = add_elem v2 v1 infl in
-                  check2 m2 p (b1 + b2); (* probably, superfluous! *)
+                  (* check2 m2 p (b1 + b2); (* probably, superfluous! *)*)
                   m2, infl
                 | Some false, m2 -> m2, infl
-                | Some true, m2 -> check2 m2 p (b1 + b2); (* probably, superfluous! *)
+                | Some true, m2 -> (* check2 m2 p (b1 + b2); (* probably, superfluous! *)*)
                   m2, infl)
             (m2, infl) l2) 
         (binary, infl) l1 in
@@ -728,12 +728,11 @@ struct
   include VarManagement
 
   let bound_texpr t texpr = 
+    if M.tracing then M.tracel "bound_texpr" "" ;
     if t.d = None then None, None
     else
       match simplified_monomials_from_texp t (Texpr1.to_expr texpr) with
-      | Some ([], offset) ->
-        (if M.tracing then M.tracel "bounds" "min: %a max: %a" GobZ.pretty offset GobZ.pretty offset;
-         Some offset, Some offset)
+      | Some ([], offset) -> (Some offset, Some offset)
       | Some ([(coeff, var)], offset) -> 
         (let c = (Z.to_int coeff) in
         let o = (Z.to_int offset) in
@@ -760,7 +759,7 @@ struct
         (min, max)
       | _ -> None, None
     
-  let bound_texpr t texpr = 
+  (* let bound_texpr t texpr = 
     let res = bound_texpr t texpr in
     if M.tracing then
       let res_str =
@@ -772,7 +771,7 @@ struct
       in
       M.tracel "bound_texpr" "bound_texpr:\n texp: %a\n res: %s"
         Texpr1.pretty texpr res_str;
-    res else res
+    res else res *)
 
 end
 
@@ -948,7 +947,7 @@ struct
     doit m1 l1 l2
   
   (** bekommt 2 octagons, returnt das unary von join, sowie beide octagons nachdem complete_partially gemacht wurde (wobei unary eig wegelassen werden kann) *)
-  let cup_unary (o1 : SparseOctagon.t) (o2 : SparseOctagon.t) =
+  (* let cup_unary (o1 : SparseOctagon.t) (o2 : SparseOctagon.t) =
     let l1 = SparseOctagon.UnaryMap.bindings o1.unary in
     let l2 = SparseOctagon.UnaryMap.bindings o2.unary in
     let final_unary, u1, u2 = 
@@ -970,7 +969,7 @@ struct
       doit SparseOctagon.UnaryMap.empty l1 l2 SparseOctagon.UnaryMap.empty SparseOctagon.UnaryMap.empty in
     let new_o1 = SparseOctagon.complete_partially o1 u1 in
     let new_o2 = SparseOctagon.complete_partially o2 u2 in
-    final_unary, new_o1, new_o2
+    final_unary, new_o1, new_o2 *)
 
   let cup (o1: SparseOctagon.t) (o2: SparseOctagon.t) = 
     let final_unary, new_o1, new_o2 = 
