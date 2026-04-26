@@ -384,48 +384,6 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     let comp v1 v2 = String.compare (show v1) (show v2)
     Only disadvantage: this requires a lot of string manipulation ... *)
 
-  (** removes all constraints with +x or -x in binary, but adds the one that hold implicitly; returns the new unary and binary *)
-  (* let forget_var_binary x unary binary infl = 
-    let infl = rebuild_infl binary in (* rebuild the influence graph, because before there werde mistakes. TODO: find the mistakes *)
-    match UnaryMap.find_opt (Pos x) infl, UnaryMap.find_opt (Neg x) infl with
-    | None,_ | _,None -> (unary, BinaryMap.filter (fun (v1, v2) _ -> v1 <> Pos x && v1 <> Neg x && v2 <> Pos x && v2 <> Neg x) binary, infl) (* remove all constraints with +x or -x*)
-    | Some pl, Some nl -> (* pl = set of literals, that are connected with Pos x, nl = for Neg x *)
-      let pl = LitSet.elements pl in (* convert sets of +x influenced Literals to lists *)
-      let nl = LitSet.elements nl in (* convert sets of -x influenced Literals to lists *)
-      iterate2 (fun (unary, binary, infl) v1 v2 -> (* iterate on crossproduct of the influenced lists, v1 positive, v2 negative *)
-        let p1 = normal (Pos x, v1) in (* setup normalized pairs, connected via pos/neg x *)
-        let p2 = normal (Neg x, v2) in
-        (* Annahme: die Pairs sind immer in normalized order gespeichert *)
-        match BinaryMap.find_opt p1 binary, BinaryMap.find_opt p2 binary with (* lookup the bounds b1, b2 for these pairs *)
-        | None, _  | _, None -> failwith "cant happen, bc there should be a binary constraint, since it is in the influence graph"
-        | Some b1, Some b2 -> 
-          let binary = BinaryMap.remove p1 (BinaryMap.remove p2 binary) in (* remove the constraints with x and -x *) 
-          let infl = rem_elem v1 v2 (rem_elem v2 v1 infl) in 
-          let b = b1 + b2 in (* calculate the bound b for v1+v2 ≤ b*)
-          if v1 = negate v2 then (* Case: we connected +x-y ≤ b1 and -x+y ≤ b2 ⇒ -y+y ≤ b ⇒ 0 ≤ b ⇒ if b is negative then error, else do nothing *)
-            if b < 0 then raise Bot 
-            else (unary, binary, infl)
-          else if v1 = v2 then   (* Case: we connected x+y ≤ b1 and -x+y ≤ b2 ⇒ y+y ≤ b ⇒ 2y ≤ b ⇒ y ≤ b/2 in unary speichern *)
-            let b = b/2 in
-            (match add_min unary v1 b with (* add y ≤ b/2 *) 
-              | Some false, unary -> (unary, binary, infl) (* new entry *)
-              | None, unary (* entry present, but no change *) | Some true, unary (* entry changed *) -> check1 unary v1 b; (unary, binary, infl))
-          else (* Case: we connected two different variables v1, v2 *) 
-            let p = normal (v1, v2) in
-            (match add2_min binary p b with (* add v1+v2 ≤ b *)
-              | Some false, binary -> (unary, binary, infl) (* entry present, but no change *)
-              | Some true, binary (* entry changed *) -> check2 binary p b; (unary, binary, infl)
-              | None, binary (* new entry *) -> check2 binary p b;
-                let infl = add_elem v1 v2 infl in
-                let infl = add_elem v2 v1 infl in 
-                (unary, binary, infl)
-              )
-      ) (unary,binary, infl) pl nl *)
-
-  (* let forget_var_binary x unary binary infl = 
-    if M.tracing then M.tracel "forget_var_binary" "" ;
-    forget_var_binary x unary binary infl
-   *)
   
   (** Remove all bounds that relate to a variable x from oct i.e. [[x := ?]] *)
   let forget_var x oct = (* change the order of arguments, so that it is forget_var oct x. *)
@@ -435,12 +393,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
       let new_unary = (UnaryMap.remove (Pos x) (UnaryMap.remove (Neg x) unary)) in
       let new_binary = BinaryMap.filter (fun (lit1, lit2) _ -> lit1 <> Pos x && lit1 <> Neg x && lit2 <> Pos x && lit2 <> Neg x) binary in
       let new_infl = (rebuild_infl new_binary) in 
-      let new_infl,new_binary = optimize new_unary new_binary new_infl in
       Some {unary = new_unary ; binary = new_binary; infl = new_infl}) 
-
-  let forget_var x oct = 
-    if M.tracing then M.tracel "forget_var" "" ;
-    forget_var x oct 
 
   let list_of = function 
     | None -> None
@@ -480,8 +433,8 @@ module Oct (Carrier : Carrier) = struct (* functor *)
       in let new_index = (Carrier.to_int old_index) + k 
       in Carrier.to_t new_index)
     in
-    let cols_list = Array.to_list ch.dim in
-    let grouped_indices = List.group Int.compare cols_list in
+    let list = Array.to_list ch.dim in
+    let grouped_indices = List.group Int.compare list in
     let occ_cols = List.map (fun group -> ((List.hd group, List.length group))) grouped_indices in 
     (* Approach from listMatrix.ml: add_empty_columns; Example: cols_list = [1; 3; 3; 5] -> grouped_indices = [[1]; [3; 3]; [5]] -> occ_cols = [(1, 1); (3, 2); (5, 1)] *)
     let new_unary = (
@@ -506,20 +459,6 @@ module Oct (Carrier : Carrier) = struct (* functor *)
     in
     { unary = new_unary; binary = new_binary; infl = (rebuild_infl new_binary) } 
 
-  let dim_add ch m = 
-    let res = dim_add ch m in 
-    if M.tracing then
-      let ch_str =
-        ch.dim
-        |> Array.to_list
-        |> List.map string_of_int
-        |> String.concat ", "
-      in
-      M.tracel "dim_add" "dim_add:\n ch: [%s]\n old t:\n%s\n new t:\n%s"
-        ch_str
-        (string_of (Some m))
-        (string_of (Some res));
-    res else res
 
   (* HELPER FUNCTIONS FOR DIM_REMOVE *)
   (* TODO: if dim_remove works, we can put the helper functions into the real functions *)
@@ -554,25 +493,6 @@ module Oct (Carrier : Carrier) = struct (* functor *)
         if List.mem (Carrier.to_int old_index1) dim_list || List.mem (Carrier.to_int old_index2) dim_list then new_binary
         else BinaryMap.add (Pos old_index1, Pos old_index2) bound new_binary
     ) BinaryMap.empty old_binary
- 
-
-  (** Remove binary constraints, where both variables are removed *)
-  (* let binary_remove1 old_binary (dim_list : int list) =
-    BinaryMap.fold (fun (old_lit1, old_lit2) bound new_binary -> 
-      match (old_lit1, old_lit2) with
-      | (Neg old_index1, Neg old_index2) -> 
-        if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
-        else BinaryMap.add (Neg old_index1, Neg old_index2) bound new_binary (* constraint behalten *)
-      | (Neg old_index1, Pos old_index2) ->
-        if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
-        else BinaryMap.add (Neg old_index1, Pos old_index2) bound new_binary (* constraint behalten *)
-      | (Pos old_index1, Neg old_index2) ->
-        if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
-        else BinaryMap.add (Pos old_index1, Neg old_index2) bound new_binary (* constraint behalten *)
-      | (Pos old_index1, Pos old_index2) ->
-        if List.mem (Carrier.to_int old_index1) dim_list && List.mem (Carrier.to_int old_index2) dim_list then new_binary (* constraint "löschen" *)
-        else BinaryMap.add (Pos old_index1, Pos old_index2) bound new_binary (* constraint behalten *)
-    ) old_binary BinaryMap.empty  *)
   
   (** changes the indeces in unary and binary for dim_remove, but doesnt remove any entries. *)
   let dim_remove_rename unary binary (dim_list : int list) =
@@ -600,26 +520,18 @@ module Oct (Carrier : Carrier) = struct (* functor *)
 
   (** remove variables (call forget_var and rename the current indeces), returns the new octagon *)
   let dim_remove (ch: Apron.Dim.change) o = 
-    let dim_list = Array.to_list ch.dim |> List.sort_uniq Int.compare in (* Duplikate entfernen *)
-    let unary =  new_unary_remove2 o.unary dim_list in (* TODO: verison 1 oder 2 verwenden? *)
+    let dim_list = Array.to_list ch.dim in
+    let dim_list = List.sort_uniq Int.compare dim_list in (* Duplikate entfernen *)
+    let unary =  new_unary_remove1 o.unary dim_list in (* TODO: verison 1 oder 2 verwenden? *)
     let binary = new_binary_remove o.binary dim_list in
     let (new_unary, new_binary) = dim_remove_rename unary binary dim_list in
-    let (optimized_infl, optimized_binary) = optimize new_unary new_binary (rebuild_infl new_binary) in
-    { unary = new_unary; binary = optimized_binary; infl = optimized_infl }
+     { unary = new_unary; binary = new_binary; infl = (rebuild_infl new_binary) }
+
 
   let dim_remove ch m = 
     let res = dim_remove ch m in 
-    if M.tracing then
-      let ch_str =
-        ch.dim
-        |> Array.to_list
-        |> List.map string_of_int
-        |> String.concat ", "
-      in
-      M.tracel "dim_remove" "dim_remove:\n ch: [%s]\n old t:\n%s\n new t:\n%s"
-        ch_str
-        (string_of (Some m))
-        (string_of (Some res));
+    if M.tracing then let ch_str = ch.dim |> Array.to_list |> List.map string_of_int |> String.concat ", "
+    in M.tracel "dim_remove" "dim_remove:\n ch: [%s]\n old t:\n%s\n new t:\n%s" ch_str (string_of (Some m)) (string_of (Some res));
     res else res
 
   end
@@ -704,23 +616,6 @@ struct
           | [(coeff, var)] when Z.equal coeff Z.one || Z.equal coeff Z.minus_one -> Some (Some (coeff, var), constant)
           |_ -> None))
 
-  let simplify_to_ref_and_offset t texp = 
-    let res = simplify_to_ref_and_offset t texp in
-    if M.tracing then
-      let res_str =
-        match res with
-        | None -> "None"
-        | Some (None, offs) -> Printf.sprintf "Some (None, %s)" (Z.to_string offs)
-        | Some (Some (coeff, var), offs) ->
-          Printf.sprintf "Some (Some (%s, %s), %s)"
-            (Z.to_string coeff)
-            (IntBased.string_of var)
-            (Z.to_string offs)
-      in
-      M.tracel "ops" "simplify_to_ref_and_offset:\n texp: %a\n res: %s"
-        Texpr1.Expr.pretty texp res_str;
-    res else res
-
 end
 
 module ExpressionBounds: (SharedFunctions.ConvBounds with type t = VarManagement.t) =
@@ -728,7 +623,7 @@ struct
   include VarManagement
 
   let bound_texpr t texpr = 
-    if M.tracing then M.tracel "bound_texpr" "" ;
+    (* if M.tracing then M.tracel "bound_texpr" "" ; *)
     if t.d = None then None, None
     else
       match simplified_monomials_from_texp t (Texpr1.to_expr texpr) with
@@ -758,20 +653,6 @@ struct
         ) in
         (min, max)
       | _ -> None, None
-    
-  (* let bound_texpr t texpr = 
-    let res = bound_texpr t texpr in
-    if M.tracing then
-      let res_str =
-        match res with
-        | (None, None) -> "(None, None)"
-        | (Some min, Some max) -> Printf.sprintf "(Some %s, Some %s)" (Z.to_string min) (Z.to_string max)
-        | (Some min, None) -> Printf.sprintf "(Some %s, None)" (Z.to_string min)
-        | (None, Some max) -> Printf.sprintf "(None, Some %s)" (Z.to_string max)
-      in
-      M.tracel "bound_texpr" "bound_texpr:\n texp: %a\n res: %s"
-        Texpr1.pretty texpr res_str;
-    res else res *)
 
 end
 
@@ -808,14 +689,6 @@ struct
   (* *************************** *)
   (* domain specific support code *)
   (* *************************** *)
-
-  (** oct ⊓ constraintlist implemented as a continuation of init *)
-  (* let cap_list_old ({unary; binary; infl} : SparseOctagon.t) list = (* old implementation of cap_list; meet origionally called this function *)
-    let (set, m1, m2, infl) = SparseOctagon.init (unary, binary, infl) list in
-    let (m1, binary, infl) = SparseOctagon.propagate2 (set, m1, m2, infl) in
-    let unary = SparseOctagon.propagate1 (m1, binary, infl) in
-    (* TOD0: evaluate, whether optimize would be a good idea here, or whether propagate1/2 are even necessary*)
-    ({unary; binary; infl} : SparseOctagon.t) *)
   
   (**
    * process both unary bounds lists to collect the common minimum of both bounds
@@ -945,31 +818,6 @@ struct
          |  _ -> doit m1 l1 t2
         ) in
     doit m1 l1 l2
-  
-  (** bekommt 2 octagons, returnt das unary von join, sowie beide octagons nachdem complete_partially gemacht wurde (wobei unary eig wegelassen werden kann) *)
-  (* let cup_unary (o1 : SparseOctagon.t) (o2 : SparseOctagon.t) =
-    let l1 = SparseOctagon.UnaryMap.bindings o1.unary in
-    let l2 = SparseOctagon.UnaryMap.bindings o2.unary in
-    let final_unary, u1, u2 = 
-      let rec doit m1 l1 l2 u1 u2 = match l1, l2 with
-        | [], [] -> (m1, u1, u2)
-        | [], (v2, b2) :: t2 -> let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in doit m1 l1 t2 u1 u2
-        | (v1, b1) :: t1, [] -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit m1 t1 l2 u1 u2
-        | (v1, b1) :: t1, (v2, b2) :: t2 -> 
-          (match SparseOctagon.LitV.compare v1 v2 with (* remove the smaller bounds wrt. variable order until we reach same variables *)
-          |  0 -> let m1 = SparseOctagon.UnaryMap.add v1 (max b1 b2) m1 in (* collect v1 ≤ b1 ⊔ b2 *)
-              if b1 <> b2 then (* falls die bound unterscheidlich sind, muss man das zu u1, u2 hinzufügen *)
-                let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in 
-                let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in
-                doit m1 t1 t2 u1 u2
-              else doit m1 t1 t2 u1 u2
-          | -1 -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit m1 t1 l2 u1 u2 
-          |  _ -> let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in doit m1 l1 t2 u1 u2 
-          ) in
-      doit SparseOctagon.UnaryMap.empty l1 l2 SparseOctagon.UnaryMap.empty SparseOctagon.UnaryMap.empty in
-    let new_o1 = SparseOctagon.complete_partially o1 u1 in
-    let new_o2 = SparseOctagon.complete_partially o2 u2 in
-    final_unary, new_o1, new_o2 *)
 
   let cup (o1: SparseOctagon.t) (o2: SparseOctagon.t) = 
     let final_unary, new_o1, new_o2 = 
@@ -1003,25 +851,6 @@ struct
     let final_infl, final_binary = SparseOctagon.optimize final_unary final_binary final_infl in (* TODO: ich bin mir nicht sicher ob man das braucht *)
     Some {SparseOctagon.unary = final_unary; binary = final_binary; infl = final_infl} 
 
-  (* let cup_for_full_closure2 (o1: SparseOctagon.t) (o2: SparseOctagon.t) = 
-    let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
-    let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
-    let unary = SparseOctagon.UnaryMap.fold (fun v b1 acc -> let b2 = SparseOctagon.UnaryMap.find v acc in SparseOctagon.UnaryMap.add v (max b1 b2) acc) unary1 SparseOctagon.UnaryMap.empty in
-    let binary = SparseOctagon.BinaryMap.fold (fun v b1 acc -> let b2 = SparseOctagon.BinaryMap.find v acc in SparseOctagon.BinaryMap.add v (max b1 b2) acc) binary1 SparseOctagon.BinaryMap.empty in 
-    Some {SparseOctagon.unary=unary; binary=binary; infl = SparseOctagon.rebuild_infl binary} *)
-
-  (* let cup_for_full_closure1 (o1: SparseOctagon.t) (o2: SparseOctagon.t) = (* verwendet cup_list und cup_list2*)
-    let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
-    let {SparseOctagon.unary=unary2; binary=binary2; infl=infl2} = o2 in
-    (* UnaryMap.bindings is a literal-ordered list *)
-    let l1 = SparseOctagon.UnaryMap.bindings unary1 in
-    let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
-    let unary = cup_list l1 l2 in             (*  unary1 ⊔ unary2  *)
-    (* BinaryMap.bindings is a pair-ordered list *)
-    let l1 = SparseOctagon.BinaryMap.bindings binary1 in
-    let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
-    let binary, infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
-    Some ({unary; binary; infl} : SparseOctagon.t) *)
 
   let cup_naive_version o1 o2  = 
     let {unary; binary; infl} : SparseOctagon.t = SparseOctagon.strong_closure o1 in  (* full closure on o1 *)
@@ -1040,15 +869,6 @@ struct
   (* *************************** *)
   (* fixpoint iteration handling *)
   (* *************************** *)
-
-  (* let meet_old octa octb = 
-    let oct =
-      match octa.d, SparseOctagon.list_of octb.d with
-      | None, _ | _, None -> None
-      | Some oct, Some l2 -> try Some (cap_list_old oct l2) (* cap_list ruft propagate2 auf btw, eigentlich wollen wir das doch vermeiden... *)
-        with Bot -> None
-    in
-    { d = oct; env = octb.env } *)
   
   (** TODO: description *)
   let meet a b = (* same as join but calls cap instead of cup *)
@@ -1062,10 +882,6 @@ struct
       {d=cap mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cap octa octb ; env = a.env} (* same environment, so we can just meet the octagons*) 
 
-  let meet a b = 
-    let res = meet a b in
-    if M.tracing then M.tracel "meet" "meet a: %s b: %s -> %s" (show a) (show b) (show res);
-    res
 
   (** TODO: description *)
   let join a b = 
@@ -1079,10 +895,6 @@ struct
       {d=cup mod_a mod_b; env = sup_env}
     | Some octa, Some octb -> { d = cup octa octb ; env = a.env} (* same environment, so we can just join the octagons*) 
 
-  let join a b =
-    let res = join a b in
-    if M.tracing then M.tracel "join" "join a: %s b: %s -> %s" (show a) (show b) (show res) ;
-    res
 
   (** TODO: description *)
   let rec doit l1 l2 u1 u2 = match l1, l2 with (* funktioniert ähnlich wie in cup_unary, aber gibt Nonen zurück wenns nicht passt. *)
@@ -1126,37 +938,6 @@ struct
         else let b1 = SparseOctagon.BinaryMap.find v new_o1.binary in
         (max b1 b2) = b1
       ) new_o2.binary true
-  
-  let leq t1 t2 =
-    let res = leq t1 t2 in
-    if M.tracing then M.tracel "leq" "leq a: %s b: %s -> %b" (show t1) (show t2) res ;
-    res
-
-  (* let leq_for_full_closure a b =
-    let env_comp = Environment.cmp a.env b.env in
-    if env_comp = -2 || env_comp > 0 then false else
-    if is_bot_env a || is_top b then true else
-    if is_bot_env b || is_top a then false else
-    (* bis hier: macht mann das immer so -> Rückgabewerte in AffineEq anschauen *)
-    let oct1, oct2 = Option.get a.d, Option.get b.d in (* octagons rausholen *)
-    let oct1'= if env_comp = 0 then oct1 else SparseOctagon.dim_add (Environment.dimchange a.env b.env) oct1 in
-    (* jetzt haben beide octagons die selben variablennummern, also x hat in beiden z.B. die nummer 1 *)
-    let {SparseOctagon.unary=unary1; binary=binary1; _} = oct1' in
-    let {SparseOctagon.unary=unary2; binary=binary2; _} = oct2 in
-    if SparseOctagon.UnaryMap.cardinal unary1 > SparseOctagon.UnaryMap.cardinal unary2 || SparseOctagon.BinaryMap.cardinal binary1 > SparseOctagon.BinaryMap.cardinal binary2 then false (* oct1 hat mehr elemente, also kanns gar nicht passen *) else
-    let unary_ok = SparseOctagon.UnaryMap.fold
-      (fun v b2 acc ->
-        if not acc then false
-        else let b1 = SparseOctagon.UnaryMap.find v unary1 in
-        (max b1 b2) = b1
-      ) unary2 true in
-    if not unary_ok then false
-    else SparseOctagon.BinaryMap.fold
-      (fun v b2 acc ->
-        if not acc then false
-        else let b1 = SparseOctagon.BinaryMap.find v binary1 in
-        (max b1 b2) = b1
-      ) binary2 true *)
  
   let widen a b = join a b (* failwith "SparseOctagonDomain.widen: not implemented" *)
   let narrow a b = meet a b (* failwith "SparseOctagonDomain.narrow: not implemented" *)
@@ -1173,11 +954,7 @@ struct
     if is_bot_env t || is_top t then t
     else let newoct = List.fold (fun oct i-> forget_var i t) (t.d) vars in
       { d = newoct; env = t.env }
-  
-  let forget_vars t vars =
-    let res = forget_vars t vars in
-    if M.tracing then let vars_str = vars|> List.map (fun v -> try let dim = Environment.dim_of_var t.env v in VarManagement.IntBased.string_of dim with _ -> "?") |> String.concat ", " in M.tracel "ops" "forget_vars: [%s] \n t:\n %s \n -> \n %s" vars_str (show t) (show res);
-    res else res
+
 
   (** simplify a texpr0 to:
     - [] + c
@@ -1212,11 +989,6 @@ struct
         let oct2 = {SparseOctagon.unary; binary; infl} in
         {t with d = Some oct2}
       | None -> t (* bot bleibt bot *)
-
-  let assign_const var c t =
-    let res = assign_const var c t in
-    if M.tracing then let var_str = try let dim = Environment.dim_of_var t.env var in VarManagement.IntBased.string_of dim with _ -> "?" in M.tracel "ops" "assign_const %s := %a" var_str GobZ.pretty (Z.of_int c);
-    res else res
 
   (** assign case:  var := +- var + c   (c is a number, possibly negative)
       if minus is true, then var := -var + c, else var := +var + c 
@@ -1259,18 +1031,6 @@ struct
         in
         {t with d = Some {unary; binary; infl = SparseOctagon.rebuild_infl binary}} (* kein subsumed nötig, da wir das octagon komplett in "x-Richtung" verschieben *)
 
-  let substitute_expr var minus c t =
-    let res = substitute_expr var minus c t in
-    if M.tracing then 
-      let var_str =
-        try
-          let dim = Environment.dim_of_var t.env var in
-          VarManagement.IntBased.string_of dim
-        with _ -> "?"
-      in
-      M.tracel "ops" "substitute_expr %s := %s * %s + %a" var_str (if minus then "-" else "+") var_str GobZ.pretty (Z.of_int c);
-    res else res
-
   (** assign case:  var := +- y + c   (c is a number, possibly negative)
       if minus is true, then var := -y + c, else var := +y + c 
   *)
@@ -1300,23 +1060,6 @@ struct
             let (unary, binary, infl) = SparseOctagon.propagate2_var y oct1.unary binary infl in
             let infl,binary = SparseOctagon.optimize unary binary infl in
             {t with d = Some {SparseOctagon.unary; binary; infl}}
-  
-  let assign_var_and_const var minus y c t =
-    let res = assign_var_and_const var minus y c t in
-    if M.tracing then 
-      let var_str =
-        try
-          let dim = Environment.dim_of_var t.env var in
-          VarManagement.IntBased.string_of dim
-        with _ -> "?"
-      in
-      let y_str =
-        try
-          VarManagement.IntBased.string_of y
-        with _ -> "?"
-      in
-      M.tracel "ops" "assign_var_and_const %s := %s * %s + %a" var_str (if minus then "-" else "+") y_str GobZ.pretty (Z.of_int c);
-    res else res
 
   (* aus LTVE, aber überarbeitet. *)
   (** Assign texpr to var in the octagon domain, for the cases ±x + c  or  c. All other cases lead to forget_var *)
@@ -1342,28 +1085,11 @@ struct
     | texp -> assign_texpr t var texp
     | exception Convert.Unsupported_CilExp _ -> forget_vars t [var]
 
-  let assign_exp ask t var exp no_ov =
-    let res = assign_exp ask t var exp no_ov in
-    if M.tracing then
-      let var_str =
-        try
-          let dim = Environment.dim_of_var t.env var in
-          VarManagement.IntBased.string_of dim
-        with _ -> "?"
-      in
-      M.tracel "ops" "assign_exp \n t:\n %s \n var: %s \n exp: %a\n no_ov: %b -> \n %s"
-        (show t) var_str d_exp exp (Lazy.force no_ov) (show res);
-    res else res
   
   (* diese funktionen konnte ich 1 zu 1 aus linearTwoVarEqualityDomain.apron.ml übernehmen *)
   let assign_var (t: VarManagement.t) v v' =
     let t = add_vars t [v; v'] in
     assign_texpr t v (Var v')
-
-  let assign_var t v v' =
-    let res = assign_var t v v' in
-    if M.tracing then M.tracel "ops" "assign_var t:\n %s \n v: %a \n v': %a\n -> %s" (show t) Var.pretty v Var.pretty v' (show res);
-    res
 
   let assign_var_parallel t vv's =
     let assigned_vars = List.map fst vv's in
@@ -1377,11 +1103,6 @@ struct
       remove_vars switched_arr primed_vars
     | _ -> t
 
-  let assign_var_parallel t vv's =
-    let res = assign_var_parallel t vv's in
-    if M.tracing then M.tracel "ops" "assign_var parallel: %s -> %s" (show t) (show res);
-    res
-
   let assign_var_parallel t vv's = Timing.wrap "var_parallel" (assign_var_parallel t) vv's
     
   let assign_var_parallel_with t vv's =
@@ -1391,28 +1112,14 @@ struct
     t.d <- t'.d;
     t.env <- t'.env
 
-  let assign_var_parallel_with t vv's =
-    if M.tracing then M.tracel "var_parallel" "assign_var parallel'";
-    assign_var_parallel_with t vv's
-
   let assign_var_parallel' t vs1 vs2 =
     let vv's = List.combine vs1 vs2 in
     assign_var_parallel t vv's
-
-  let assign_var_parallel' t vv's =
-    let res = assign_var_parallel' t vv's in
-    if M.tracing then M.tracel "ops" "assign_var parallel'";
-    res
 
   let substitute_exp ask t var exp no_ov =
     let t = if not @@ Environment.mem_var t.env var then add_vars t [var] else t in
     let res = assign_exp ask t var exp no_ov in
     forget_vars res [var] (* forget_vars statt forget_var wegen dem type *) 
-
-  let substitute_exp ask t var exp no_ov =
-    let res = substitute_exp ask t var exp no_ov in
-    if M.tracing then M.tracel "ops" "substitute_exp t: \n %s \n var: %a \n exp: %a \n -> \n %s" (show t) Var.pretty var d_exp exp (show res);
-    res
 
   let substitute_exp ask t var exp no_ov = Timing.wrap "substitution" (substitute_exp ask t var exp) no_ov
     
@@ -1473,11 +1180,6 @@ struct
       )
     | exception Convert.Unsupported_CilExp _ -> d
 
-  let assert_constraint ask d e negate no_ov = 
-    let res = assert_constraint ask d e negate no_ov in
-    if M.tracing then M.tracel "ops" "assert_constraint d: \n %s \n e: %a \n negate: %b \n no_ov: %b -> \n %s" (show d) d_exp e negate (Lazy.force no_ov) (show res);
-    res 
-
   let env t = t.env
   let eval_interval ask = Bounds.bound_texpr
   let invariant t = failwith "SparseOctagonDomain.invariant: not implemented"
@@ -1488,7 +1190,6 @@ struct
   let unmarshal t = t
   let relift t = t
 end
-
 
 
 (* Map: fold f m init computes (f kN dN ... (f k1 d1 init)...), where k1 ... kN are keys, and d1 ... dN are associated data *)
