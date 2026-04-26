@@ -36,8 +36,10 @@ end
 (** Literal, i.e. +var or -var
  *  ordered and printable
 *)
-module Lit (C : Carrier) = struct (* implement the functor Lit *)
+module Lit (C : Carrier) = struct 
   type t = C.t lit [@@deriving hash] 
+
+  (** returns 1 if a > b, 0 if a = b, -1 if a < b *)
   let compare a b = match a, b with
     | Pos x, Pos y
     | Neg x, Neg y -> C.compare x y
@@ -354,13 +356,6 @@ module Oct (Carrier : Carrier) = struct (* functor *)
             (m2, infl) l2) 
         (binary, infl) l1 in
     {unary; binary; infl}
-  
-  (* TODO: we probably wont need this function -> could be removed *)
-  let strong_closure oct = (* anschauen ob das so passt, evtl. neu machen *)
-    let oct = complete oct in (* first enrich binary bounds by summing up unaries *)
-    let (m1, m2, infl) = propagate2 (VarSet.of_list (List.map (fun (v, _) -> var_of_lit v) (UnaryMap.bindings oct.unary)), oct.unary, oct.binary, oct.infl) in (* then propagate binary bounds through the octagon *)
-    let m1 = propagate1 (m1, m2, infl) in (* finally, propagate unary bounds through the octagon *)
-    {unary = m1; binary = m2; infl}
 
   (** 
    * Create an octagon from a list of constraints;
@@ -827,8 +822,8 @@ struct
         let final_unary, u1, u2 = 
           let rec doit m1 l1 l2 u1 u2 = match l1, l2 with
             | [], [] -> (m1, u1, u2)
-            | [], (v2, b2) :: t2 -> let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in doit m1 l1 t2 u1 u2
-            | (v1, b1) :: t1, [] -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit m1 t1 l2 u1 u2
+            | [], (v2, b2) :: t2 -> let u2 = SparseOctagon.UnaryMap.add v2 b2 u2 in doit m1 l1 t2 u1 u2 (* constraint nur in einem der beiden octagons*)
+            | (v1, b1) :: t1, [] -> let u1 = SparseOctagon.UnaryMap.add v1 b1 u1 in doit m1 t1 l2 u1 u2 (* constraint nur in einem der beiden octagons*)
             | (v1, b1) :: t1, (v2, b2) :: t2 -> 
               (match SparseOctagon.LitV.compare v1 v2 with (* remove the smaller bounds wrt. variable order until we reach same variables *)
               |  0 -> let m1 = SparseOctagon.UnaryMap.add v1 (max b1 b2) m1 in (* collect v1 ≤ b1 ⊔ b2 *)
@@ -850,21 +845,6 @@ struct
     let final_binary, final_infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
     let final_infl, final_binary = SparseOctagon.optimize final_unary final_binary final_infl in (* TODO: ich bin mir nicht sicher ob man das braucht *)
     Some {SparseOctagon.unary = final_unary; binary = final_binary; infl = final_infl} 
-
-
-  let cup_naive_version o1 o2  = 
-    let {unary; binary; infl} : SparseOctagon.t = SparseOctagon.strong_closure o1 in  (* full closure on o1 *)
-    let {unary = unary2; binary = binary2; _ } : SparseOctagon.t = SparseOctagon.strong_closure o2 in  (* full closure on o2 *)
-    (* BinaryMap.bindings is a pair-ordered list *)
-    let l1 = SparseOctagon.BinaryMap.bindings binary in
-    let l2 = SparseOctagon.BinaryMap.bindings binary2 in 
-    let binary, infl = cup_list2 l1 l2 in     (* binary1 ⊔ binary2 *)
-    (* UnaryMap.bindings is a literal-ordered list *)
-    let l1 = SparseOctagon.UnaryMap.bindings unary in
-    let l2 = SparseOctagon.UnaryMap.bindings unary2 in 
-    let unary = cup_list l1 l2 in             (*  unary1 ⊔ unary2  *)
-    (* TOD0: Do we need to think about calling optimize to get rid of redundant pair bounds?*)
-    Some ({unary; binary; infl} : SparseOctagon.t) 
 
   (* *************************** *)
   (* fixpoint iteration handling *)
