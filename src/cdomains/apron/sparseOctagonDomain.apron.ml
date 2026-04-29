@@ -552,7 +552,7 @@ struct
   module SparseOctagon = Oct(IntBased)
   include SharedFunctions.VarManagementOps (SparseOctagon)
 
-    (* aus LTVE, aber überarbeitet. *)
+  (* aus LTVE, aber überarbeitet. *)
   (** Parses a Texpr to obtain a (coefficient, variable) pair list to repr. a sum of a variables that have a coefficient. If variable is None, the coefficient represents a constant offset. *)
   let monomials_from_texp (t: t) texp =
     let open Apron.Texpr1 in
@@ -618,7 +618,6 @@ struct
   include VarManagement
 
   let bound_texpr t texpr = 
-    (* if M.tracing then M.tracel "bound_texpr" "" ; *)
     if t.d = None then None, None
     else
       match simplified_monomials_from_texp t (Texpr1.to_expr texpr) with
@@ -637,15 +636,17 @@ struct
         let v1, neg_v1 = if Z.equal coeff1 Z.one then Pos var1, Neg var1 else Neg var1, Pos var1 in
         let v2, neg_v2 = if Z.equal coeff2 Z.one then Pos var2, Neg var2 else Neg var2, Pos var2 in
         let max =
-          (match VarManagement.SparseOctagon.UnaryMap.find_opt v1 (Option.get t.d).unary, VarManagement.SparseOctagon.UnaryMap.find_opt v2 (Option.get t.d).unary with
+          match VarManagement.SparseOctagon.BinaryMap.find_opt (VarManagement.SparseOctagon.normal (v1, v2)) (Option.get t.d).binary with 
+          | Some z -> Some (Z.of_int (z + o)) 
+          | None -> (match VarManagement.SparseOctagon.UnaryMap.find_opt v1 (Option.get t.d).unary, VarManagement.SparseOctagon.UnaryMap.find_opt v2 (Option.get t.d).unary with
           | Some x, Some y -> Some (Z.of_int (Z.to_int coeff1 * x + Z.to_int coeff2 * y + o))
-          | _ -> match VarManagement.SparseOctagon.BinaryMap.find_opt (VarManagement.SparseOctagon.normal (v1, v2)) (Option.get t.d).binary with Some z -> Some (Z.of_int (z + o)) | None -> None
-          ) in
+          | _ -> None) in
         let min =
-          (match VarManagement.SparseOctagon.UnaryMap.find_opt neg_v1 (Option.get t.d).unary, VarManagement.SparseOctagon.UnaryMap.find_opt neg_v2 (Option.get t.d).unary with
+          match VarManagement.SparseOctagon.BinaryMap.find_opt (VarManagement.SparseOctagon.normal (neg_v1, neg_v2)) (Option.get t.d).binary with 
+          | Some b -> Some (Z.of_int (- b + o)) 
+          | None -> (match VarManagement.SparseOctagon.UnaryMap.find_opt neg_v1 (Option.get t.d).unary, VarManagement.SparseOctagon.UnaryMap.find_opt neg_v2 (Option.get t.d).unary with
           | Some x, Some y -> Some (Z.of_int (- Z.to_int coeff1 * x - Z.to_int coeff2 * y + o))
-          | _ -> match VarManagement.SparseOctagon.BinaryMap.find_opt (VarManagement.SparseOctagon.normal (neg_v1, neg_v2)) (Option.get t.d).binary with Some b -> Some (Z.of_int (- b + o)) | None -> None
-        ) in
+          | _ -> None) in
         (min, max)
       | _ -> None, None
 
