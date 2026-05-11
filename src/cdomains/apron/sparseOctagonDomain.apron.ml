@@ -456,15 +456,13 @@ module Oct (Carrier : Carrier) = struct (* functor *)
 
 
   (* HELPER FUNCTIONS FOR DIM_REMOVE *)
-  (* TODO: if dim_remove works, we can put the helper functions into the real functions *)
+  (* TODO: if dim_remove works, we can put the helper functions into the real function *)
 
-  (** TODO: description *)
-  (* iteriert über liste zu löschender variablen *)
+  (** removes all variables in dim_list from the unary map, by iterating over dim_list *)
   let new_unary_remove1 unary (dim_list : int list) = 
     List.fold_left (fun new_unary x -> UnaryMap.remove (Pos (Carrier.to_t x)) (UnaryMap.remove (Neg (Carrier.to_t x)) new_unary)) unary dim_list 
 
-  (** TODO: description *)
-  (* iteriert über unary map *)
+  (** removes all variables in dim_list from the unary map, by iterating over unary *)
   let new_unary_remove2 old_unary (dim_list : int list) = 
     UnaryMap.fold (fun old_lit bound new_unary -> 
         match old_lit with
@@ -517,7 +515,7 @@ module Oct (Carrier : Carrier) = struct (* functor *)
   let dim_remove (ch: Apron.Dim.change) o = 
     let dim_list = Array.to_list ch.dim in
     let dim_list = List.sort_uniq Int.compare dim_list in (* Duplikate entfernen *)
-    let unary =  new_unary_remove1 o.unary dim_list in (* TODO: verison 1 oder 2 verwenden? *)
+    let unary =  new_unary_remove1 o.unary dim_list in (* TODO: version 1 oder 2 verwenden? *)
     let binary = new_binary_remove o.binary dim_list in
     let (new_unary, new_binary) = dim_remove_rename unary binary dim_list in
      { unary = new_unary; binary = new_binary; infl = (rebuild_infl new_binary) }
@@ -602,7 +600,7 @@ struct
         let (expr, constant) = List.fold_left accumulate_constants (IMap.empty, Z.zero) monomiallist in
         Some (IMap.fold (fun v c acc -> if Z.equal c Z.zero then acc else (c, v) :: acc) expr [], constant))
 
-  (** TODO: description *)
+  (** simplify a texpr into +-x +c or only c. *)
   let simplify_to_ref_and_offset (t: t) texp =
     BatOption.bind (simplified_monomials_from_texp t texp )
       (fun (sum_of_terms, constant) ->
@@ -750,7 +748,7 @@ struct
         ) in
     doit (m2, infl) l1 l2
 
-  (** TODO: description *)
+  (** does the intersection of two sparse octagons *)
   let cap (o1: SparseOctagon.t) (o2: SparseOctagon.t) = (* implementation basically wie cup_for_full_clousure *)
     try
       let {SparseOctagon.unary=unary1; binary=binary1; infl=infl1} = o1 in
@@ -851,7 +849,6 @@ struct
   (* fixpoint iteration handling *)
   (* *************************** *)
   
-  (** TODO: description *)
   let meet a b = (* same as join but calls cap instead of cup *)
     match a.d,b.d with
     | None, _ -> b
@@ -864,7 +861,6 @@ struct
     | Some octa, Some octb -> { d = cap octa octb ; env = a.env} (* same environment, so we can just meet the octagons*) 
 
 
-  (** TODO: description *)
   let join a b = 
     match a.d,b.d with
     | None, _ -> b
@@ -877,7 +873,6 @@ struct
     | Some octa, Some octb -> { d = cup octa octb ; env = a.env} (* same environment, so we can just join the octagons*) 
 
 
-  (** TODO: description *)
   let rec doit l1 l2 u1 u2 = match l1, l2 with (* funktioniert ähnlich wie in cup_unary, aber gibt Nonen zurück wenns nicht passt. *)
     | [], [] ->  Some (u1, u2)
     | [], (v2, b2) :: t2 -> None
@@ -893,7 +888,6 @@ struct
       |  _ -> None
       ) 
 
-  (** TODO: description *)
   let leq a b = 
     let env_comp = Environment.cmp a.env b.env in
     if env_comp = -2 || env_comp > 0 then false else
@@ -1131,7 +1125,7 @@ struct
               | Apron.Tcons0.SUPEQ (* expr >= 0 *) -> SparseOctagon.UnaryMap.add lit c SparseOctagon.UnaryMap.empty 
               | Apron.Tcons0.SUP (* expr > 0 *) -> SparseOctagon.UnaryMap.add lit (c - 1) SparseOctagon.UnaryMap.empty
               | Apron.Tcons0.EQ (* expr = 0 *) -> SparseOctagon.UnaryMap.add lit c (SparseOctagon.UnaryMap.add nlit (-c) SparseOctagon.UnaryMap.empty) 
-              | Apron.Tcons0.DISEQ (* expr != 0 *) -> SparseOctagon.UnaryMap.add lit (c - 1) (SparseOctagon.UnaryMap.add nlit ((-c) - 1) SparseOctagon.UnaryMap.empty)
+              | Apron.Tcons0.DISEQ (* expr != 0 *) -> SparseOctagon.UnaryMap.empty (* we cannot add the constraint, so we do not change anything *)
               | Apron.Tcons0.EQMOD (_) (* expr = 0 (mod m) *) -> SparseOctagon.UnaryMap.empty (* we cannot add the constraint, so we do not change anything *)
             ) in 
           let oct = {SparseOctagon.unary; binary = SparseOctagon.BinaryMap.empty; infl = SparseOctagon.UnaryMap.empty} in
@@ -1151,7 +1145,7 @@ struct
               | Apron.Tcons0.SUPEQ (* expr >= 0 *) -> SparseOctagon.BinaryMap.add p c SparseOctagon.BinaryMap.empty
               | Apron.Tcons0.SUP (* expr > 0 *) -> SparseOctagon.BinaryMap.add p (c - 1) SparseOctagon.BinaryMap.empty
               | Apron.Tcons0.EQ (* expr = 0 *) -> SparseOctagon.BinaryMap.add p c (SparseOctagon.BinaryMap.add np (-c) SparseOctagon.BinaryMap.empty)
-              | Apron.Tcons0.DISEQ (* expr != 0 *) -> SparseOctagon.BinaryMap.add p (c - 1) (SparseOctagon.BinaryMap.add np ((-c) - 1) SparseOctagon.BinaryMap.empty)
+              | Apron.Tcons0.DISEQ (* expr != 0 *) -> SparseOctagon.BinaryMap.empty (* we cannot add the constraint, so we do not change anything *)
               | Apron.Tcons0.EQMOD (_) (* expr = 0 (mod m) *) -> SparseOctagon.BinaryMap.empty (* we cannot add the constraint, so we do not change anything *)
             ) in
           let oct = {SparseOctagon.unary =SparseOctagon.UnaryMap.empty; binary = binary; infl = SparseOctagon.UnaryMap.empty} in
@@ -1172,10 +1166,6 @@ struct
   let relift t = t
 end
 
-
-(* Map: fold f m init computes (f kN dN ... (f k1 d1 init)...), where k1 ... kN are keys, and d1 ... dN are associated data *)
-(* List: fold_left f startwert [x1; x2; ...; xn] bedeutet: f ( ... (f (f startwert x1) x2) ... ) xn *)
-(* Achtung: bei Map zuerst map, dann startwert, bei list is es anders herum *)
 
 module D2: RelationDomain.RD with type var = Var.t =
 struct
